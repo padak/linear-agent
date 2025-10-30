@@ -81,32 +81,86 @@
 
 ## SemanticSearch & Learning Memory
 
-**Responsibility:** Use embeddings and mem0 to learn user preferences and semantically search Linear issues.
+**Responsibility:** Full-featured persistent memory and preference learning using mem0. Agent learns from all interactions to personalize briefings and responses.
 
 **Key Interfaces:**
 - `class SemanticIssueIndex`
   - `async def index_issue(issue: Issue) -> None` - Generate and store embedding for issue
-  - `async def search_similar(query: str, top_k: int = 10) -> List[Issue]` - Semantic search
+  - `async def search_similar(query: str, top_k: int = 10) -> List[Issue]` - Semantic similarity search
+  - `async def find_related(issue_id: str) -> List[Issue]` - Find issues related to given issue
+
 - `class PreferenceLearner` (uses mem0)
-  - `async def observe_interaction(issue_id: str, action: str)` - Track what user engages with
-  - `async def get_user_interests() -> Dict[str, float]` - Retrieve learned preferences (topics, labels, teams)
+  - `async def observe_interaction(issue_id: str, action: str, context: Dict) -> None` - Track user engagement
+  - `async def get_user_interests() -> PreferenceProfile` - Retrieve learned preferences
+  - `async def get_agent_context(days: int = 7) -> AgentMemory` - Retrieve recent briefing history and narrative
+
+- `class FeedbackTracker`
+  - `async def record_feedback(issue_id: str, feedback: Literal["relevant", "irrelevant"]) -> None` - Track Telegram inline button clicks
+  - `async def get_feedback_stats() -> Dict[str, float]` - Retrieve feedback metrics for learning
 
 **Dependencies:**
 - `mem0` - Persistent memory layer for agent context and user preferences
-- `sentence-transformers` - Generate embeddings for Linear issue content
-- `chromadb` or `faiss` - Vector database for similarity search (optional, can use pgvector if migrating to PostgreSQL)
+- `sentence-transformers` - Generate embeddings for Linear issue content (all-MiniLM-L6-v2 model)
+- `chromadb` - Vector database for similarity search and semantic queries
 
-**Technology Stack:** Python, mem0, sentence-transformers (all-MiniLM-L6-v2 model), numpy
+**Technology Stack:** Python, mem0, sentence-transformers, ChromaDB, numpy
 
-**Design Decision:** mem0 replaces custom DB-based agent context. Instead of storing JSON blobs, use mem0's memory graph to track:
-- User interaction patterns (which issues get clicked/commented on)
-- Topic preferences (backend vs. frontend, features vs. bugs)
-- Team/project focus areas
-- Historical briefing quality feedback
+**Learning Capabilities:**
+1. **Agent Context Memory:**
+   - Stores last 7 days of briefing narratives
+   - Tracks which issues were flagged and why
+   - Enables continuity: "Yesterday I said ENG-123 was stale, today it's STILL stale → escalate"
+
+2. **User Preference Learning:**
+   - Topics: backend (40%), API (30%), frontend (20%), infra (10%)
+   - Teams: most engaged with @api-team, @backend-team
+   - Labels: prioritizes "security", "performance" over "nice-to-have"
+   - Historical patterns: user reads blocked issues first, skips documentation tasks
+
+3. **Interaction Tracking:**
+   - Telegram queries: "What's blocked?" → learns user cares about blockers
+   - Inline feedback: 👍/👎 per issue → refines relevance scoring
+   - Read receipts: which issues user actually opened in Linear → implicit feedback
+   - Conversation history: maintains context across multi-turn dialogues
+
+4. **Semantic Search:**
+   - Find similar issues based on embeddings
+   - "Show me issues like ENG-123" → returns semantically similar issues
+   - Cluster analysis: group related issues automatically
+   - Duplicate detection: flag potential duplicates
 
 **Integration with Agent SDK:**
-- mem0 context is passed to Agent SDK prompts as "user context"
-- Agent uses this to prioritize issues semantically aligned with user interests
+- mem0 context passed to Claude as system prompt: "User preferences: [mem0 data]"
+- Agent uses preferences to re-rank IssueRanker output
+- Agent tailors language based on user history (technical vs. managerial tone)
+- Agent remembers unresolved follow-ups: "Last week you asked about X, here's the update"
+
+**Data Storage:**
+- mem0 memory graph: stores all memories with timestamps and relationships
+- ChromaDB: stores issue embeddings (384-dim vectors from sentence-transformers)
+- SQLite: stores feedback data (`issue_feedback` table with ratings)
+
+**Example Flow:**
+```python
+# Morning briefing generation
+agent_memory = mem0.get_agent_context(days=7)
+user_prefs = mem0.get_user_interests()
+
+# Agent sees:
+# - "Yesterday flagged ENG-123 as stale (4 days)"
+# - "User engages with backend issues 2x more than frontend"
+# - "User gave 👍 to security-labeled issues last 3 times"
+
+# Agent adjusts:
+# - Prioritizes backend issues higher
+# - Flags security issues even if not top-ranked
+# - Continues narrative: "ENG-123 still stale, now 5 days"
+```
+
+**Configuration:**
+- `MEM0_API_KEY` - mem0 API key (if using hosted)
+- `CHROMADB_PATH` - ChromaDB persistence directory (default: `~/.linear_chief/chromadb`)
+- `EMBEDDING_MODEL` - sentence-transformers model (default: `all-MiniLM-L6-v2`)
 
 ## Telegram Bot
 

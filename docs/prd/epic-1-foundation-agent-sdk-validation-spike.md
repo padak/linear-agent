@@ -59,11 +59,24 @@ Set up the development environment, integrate Anthropic Agent SDK, and validate 
 
 **Acceptance Criteria:**
 1. `src/linear_chief/cost_tracker.py` module logs token usage per API call
-2. Test script generates 10 briefings with 50 issues each and reports total tokens used
-3. Cost calculation: tokens × Anthropic pricing (get current rate from docs)
-4. Extrapolate to monthly cost: (tokens per briefing) × 30 days
-5. If monthly cost > $100, document optimization strategies: prompt compression, caching, fewer issues
-6. Results documented in `docs/week1-spike-results.md` with decision: proceed, optimize, or pivot
-7. Linear API rate limits researched and documented (confirm polling strategy is viable)
+2. Test script generates 30 briefings with 50 issues each to simulate full month
+3. Cost calculation using Claude Sonnet 3.5 pricing:
+   - Input: $3 per 1M tokens
+   - Output: $15 per 1M tokens
+   - Formula: (input_tokens × $3/1M) + (output_tokens × $15/1M)
+4. Expected token usage per briefing:
+   - Input: ~10K tokens (50 issues × 200 tokens/issue average)
+   - Output: ~2K tokens (briefing summary)
+   - Cost per briefing: (10K × $3/1M) + (2K × $15/1M) = $0.03 + $0.03 = $0.06
+5. Monthly cost projection:
+   - 30 briefings × $0.06 = $1.80/month
+   - Buffer for experimentation (5x): $9/month
+   - Target budget: <$20/month (well under original $100 estimate)
+6. If actual cost exceeds $20/month, implement optimizations:
+   - Reduce issue count (top 30 instead of 50)
+   - Use prompt caching (reuse issue data across briefings)
+   - Switch to Claude Haiku for less critical summaries ($0.25/$1.25 per 1M)
+7. Results documented in `docs/week1-spike-results.md` with decision: proceed, optimize, or pivot
+8. Linear API rate limits researched and documented (confirm polling strategy is viable)
 
 ---

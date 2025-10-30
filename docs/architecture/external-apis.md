@@ -6,7 +6,7 @@
 - **Documentation:** https://developers.linear.app/docs/graphql/working-with-the-graphql-api
 - **Base URL(s):** `https://api.linear.app/graphql`
 - **Authentication:** Personal API key (header: `Authorization: Bearer <token>`) or OAuth2 (future)
-- **Rate Limits:** 100 requests per minute per API key
+- **Rate Limits:** 100 requests per minute per API key (to be validated in Week 1 spike - Linear API docs were inaccessible during architecture phase)
 
 **Key Endpoints Used:**
 - `POST /graphql` - Main query endpoint
