@@ -75,11 +75,16 @@ This problem is ideal for exploring agent architectures because it requires:
 ### Primary: Master Anthropic Agent SDK
 
 **Critical questions to answer through this project:**
-1. **Scheduling & Autonomy:** How does the Agent SDK handle long-running processes? Does it support cron-like scheduling, or do we need external orchestration?
-2. **Persistent Memory:** How to maintain state across agent invocations (briefing history, user preferences, issue tracking)?
-3. **Tool Integration:** Best practices for integrating external APIs (Linear, Telegram) as agent "tools"
-4. **Cost Modeling:** Real-world token usage patterns—how much does continuous monitoring actually cost?
+1. **Prompt Engineering:** How to craft prompts that reliably produce concise, actionable briefings (1-2 sentences per issue)?
+2. **Persistent Memory (mem0):** How to structure memory for agent context + user preferences? What's the right data model?
+3. **Cost Optimization:** Real-world token usage patterns—how to stay under $20/month with quality briefings?
+4. **Semantic Search:** How to use embeddings effectively for preference learning and issue prioritization?
 5. **Error Handling:** How to build resilient agents that handle API failures, rate limits, and edge cases gracefully?
+
+**Locked-in decisions (no longer "open questions"):**
+- ✅ **Scheduling:** APScheduler (cron-like triggers at 9 AM daily)
+- ✅ **Memory:** mem0 (persistent agent context + user preferences)
+- ✅ **LLM:** Anthropic Claude via Messages API (briefing generation)
 
 ### Secondary: Real-World AI System Design
 
@@ -90,13 +95,13 @@ This problem is ideal for exploring agent architectures because it requires:
 
 ### Validation Before Full Build
 
-**Codex identified critical unknowns—validate these FIRST:**
-- [ ] Agent SDK supports scheduled execution OR identify orchestration approach
-- [ ] Agent SDK persistent memory patterns OR design custom state management
-- [ ] Cost modeling: estimate tokens per briefing (aim for <$100/month)
-- [ ] Linear API rate limits: confirm polling strategy won't hit limits
+**Week 1 spike validates these technical assumptions:**
+- [ ] Prompt template produces quality briefings (1-2 sentences per issue)
+- [ ] Cost modeling with real data: measure tokens for 30 briefings with 50 issues (target: <$20/month)
+- [ ] Linear API rate limits: confirm 100 req/min allows our polling strategy
+- [ ] mem0 integration: verify memory persistence and retrieval works as expected
 
-**Week 1 spike goal:** Prototype minimal agent that can reason about Linear issues and generate a single briefing. This validates core SDK assumptions before investing in full build.
+**Week 1 spike goal:** Prototype working briefing generator using locked-in tech stack (APScheduler + mem0 + Claude). Validates cost and quality assumptions before building production features.
 
 ---
 
