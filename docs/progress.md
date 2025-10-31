@@ -8,8 +8,11 @@ Last Updated: 2025-10-31
 
 **Status:** ✅ **100% Complete** (všechny komponenty fungují + E2E test PASSED!)
 
-**Completion Date:** 2025-10-31 22:41
-**Test Evidence:** Telegram briefing successfully delivered to production
+**Completion Date:** 2025-10-31 23:15
+**Test Evidence:**
+- Telegram briefing successfully delivered to production
+- Intelligent issue filtering implemented and tested
+- 3-source aggregation working (assigned + created + subscribed)
 
 ### Completed Tasks ✅
 
@@ -28,6 +31,12 @@ Last Updated: 2025-10-31
   - [x] Implement `get_teams()` method
   - [x] Error handling and logging
   - [x] Fix f-string syntax errors (Python 3.11 compatibility)
+  - [x] **Intelligent Issue Filtering** (`get_my_relevant_issues()`)
+    - [x] Fetch assigned issues
+    - [x] Fetch created issues
+    - [x] Fetch subscribed issues (correct API syntax)
+    - [x] Deduplicate by issue ID
+    - [x] Debug GraphQL errors and fix API calls
 
 - [x] **Agent SDK Integration** (`src/linear_chief/agent/`)
   - [x] Create BriefingAgent wrapper
@@ -92,6 +101,15 @@ Briefing sent to Telegram! ✓
 - Status Summary (1 completed, 2 in progress)
 - Blockers & Risks (NetSuite testing accounts blocker)
 - Quick Wins (3 actionable items)
+
+**Filtering Implementation:**
+- Successfully aggregates issues from 3 sources
+- Deduplicates by issue ID
+- Uses correct Linear GraphQL API syntax:
+  - `assignee: {id: {eq: "user-id"}}`
+  - `creator: {id: {eq: "user-id"}}`
+  - `subscribers: {email: {eq: "user@email.com"}}`
+- Returns `subscribers { nodes { id, email } }` not `subscriberIds`
 
 ---
 

@@ -65,13 +65,19 @@ class LinearClient:
         logger.debug(f"Executing Linear GraphQL query: {query[:100]}...")
 
         response = await self.client.post(self.API_URL, json=payload)
-        response.raise_for_status()
 
-        data = response.json()
+        # Parse response even if HTTP error
+        try:
+            data = response.json()
+        except Exception:
+            data = {}
 
+        # Log GraphQL errors before raising HTTP error
         if "errors" in data:
             logger.error(f"GraphQL errors: {data['errors']}")
             raise Exception(f"GraphQL query failed: {data['errors']}")
+
+        response.raise_for_status()
 
         return data.get("data", {})
 
@@ -220,6 +226,7 @@ class LinearClient:
         """
         viewer = await self.get_viewer()
         viewer_id = viewer.get("id")
+        viewer_email = viewer.get("email")
 
         if not viewer_id:
             logger.error("Could not get viewer ID")
@@ -233,7 +240,7 @@ class LinearClient:
         created_issues = await self._get_created_issues(viewer_id, limit)
 
         logger.info("Fetching subscribed issues...")
-        subscribed_issues = await self._get_subscribed_issues(limit)
+        subscribed_issues = await self._get_subscribed_issues(viewer_email, limit) if viewer_email else []
 
         # Aggregate and deduplicate by issue ID
         all_issues = {}
@@ -309,9 +316,9 @@ class LinearClient:
         result = await self.query(query)
         return result.get("issues", {}).get("nodes", [])
 
-    async def _get_subscribed_issues(self, limit: int) -> List[Dict[str, Any]]:
+    async def _get_subscribed_issues(self, email: str, limit: int) -> List[Dict[str, Any]]:
         """Fetch issues the user is subscribed to."""
-        filter_clause = 'filter: {subscribers: {some: {}}}'
+        filter_clause = 'filter: {subscribers: {email: {eq: "' + email + '"}}}'
 
         query = f"""
         query {{
@@ -365,15 +372,16 @@ class LinearClient:
                   }}
                 }}
               }}
-              subscriberIds
+              subscribers {{
+                nodes {{
+                  id
+                  email
+                }}
+              }}
             }}
           }}
         }}
         """
 
         result = await self.query(query)
-        issues = result.get("issues", {}).get("nodes", [])
-
-        # Filter to only issues where current user is actually subscribed
-        # (Linear API might return all subscribed issues, need to verify viewer is in list)
-        return issues
+        return result.get("issues", {}).get("nodes", [])
