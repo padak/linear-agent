@@ -69,7 +69,10 @@ class IssueVectorStore:
             description: Issue description.
             metadata: Optional metadata (status, assignee, labels, etc.).
         """
-        metadata = metadata or {}
+        # ChromaDB requires metadata to be either None or a non-empty dict
+        # Default to a minimal metadata dict if none provided
+        if not metadata:
+            metadata = {"_placeholder": "true"}
 
         # Combine title and description for embedding
         combined_text = f"{title}\n\n{description}"

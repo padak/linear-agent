@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from src.linear_chief.intelligence import AnalysisResult, IssueAnalyzer
+from linear_chief.intelligence import AnalysisResult, IssueAnalyzer
 
 
 class TestIssueAnalyzer:

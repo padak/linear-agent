@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.linear_chief.memory import IssueVectorStore, MemoryManager
+from linear_chief.memory import IssueVectorStore, MemoryManager
 
 
 class TestMemoryManager:
@@ -15,7 +15,7 @@ class TestMemoryManager:
     @pytest.fixture
     def memory_manager_no_api_key(self):
         """Create MemoryManager without API key (in-memory mode)."""
-        with patch("src.linear_chief.memory.mem0_wrapper.MEM0_API_KEY", ""):
+        with patch("linear_chief.memory.mem0_wrapper.MEM0_API_KEY", ""):
             return MemoryManager()
 
     @pytest.mark.asyncio
@@ -85,7 +85,7 @@ class TestIssueVectorStore:
     @pytest.fixture
     def mock_chroma_client(self):
         """Mock ChromaDB client."""
-        with patch("src.linear_chief.memory.vector_store.chromadb.PersistentClient") as mock_client:
+        with patch("linear_chief.memory.vector_store.chromadb.PersistentClient") as mock_client:
             mock_collection = MagicMock()
             mock_client.return_value.get_or_create_collection.return_value = mock_collection
             yield mock_client, mock_collection
@@ -93,7 +93,7 @@ class TestIssueVectorStore:
     @pytest.fixture
     def mock_sentence_transformer(self):
         """Mock SentenceTransformer model."""
-        with patch("src.linear_chief.memory.vector_store.SentenceTransformer") as mock_model:
+        with patch("linear_chief.memory.vector_store.SentenceTransformer") as mock_model:
             mock_instance = MagicMock()
             mock_instance.encode.return_value.tolist.return_value = [0.1, 0.2, 0.3]
             mock_model.return_value = mock_instance

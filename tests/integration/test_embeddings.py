@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from src.linear_chief.memory import IssueVectorStore
+from linear_chief.memory import IssueVectorStore
 
 
 @pytest.fixture
 def temp_chromadb_path(monkeypatch):
     """Create temporary ChromaDB directory for testing."""
     temp_dir = Path(tempfile.mkdtemp())
-    monkeypatch.setattr("src.linear_chief.memory.vector_store.CHROMADB_PATH", temp_dir)
+    monkeypatch.setattr("linear_chief.memory.vector_store.CHROMADB_PATH", temp_dir)
     yield temp_dir
     # Cleanup
     shutil.rmtree(temp_dir, ignore_errors=True)

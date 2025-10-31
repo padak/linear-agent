@@ -1,7 +1,7 @@
 """Issue analysis logic for stagnation detection, blocking detection, and priority calculation."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .types import AnalysisResult
@@ -234,10 +234,16 @@ class IssueAnalyzer:
         insights = []
 
         if is_stagnant:
-            days_since_update = (
-                datetime.now(datetime.now().astimezone().tzinfo)
-                - datetime.fromisoformat(issue.get("updatedAt", "").replace("Z", "+00:00"))
-            ).days
+            # Parse updatedAt and ensure both datetimes are timezone-aware
+            updated_at_str = issue.get("updatedAt", "")
+            updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+
+            # If the parsed datetime is naive, assume it's UTC
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+
+            now = datetime.now(timezone.utc)
+            days_since_update = (now - updated_at).days
             insights.append(f"No activity for {days_since_update} days - needs attention")
 
         if is_blocked:
