@@ -1,65 +1,65 @@
 # Linear Chief of Staff - Roadmap
 
-## MVP (Week 1-4): Morning Digest with Full-Featured mem0
+## MVP (Week 1-4): Morning Digest with Basic Context
 
 ### Core Features
 - ✅ Morning briefing (9 AM daily) via Telegram
 - ✅ Linear issue tracking (assigned + watched)
 - ✅ Issue analysis (blocked, stale, active)
 - ✅ Intelligent ranking (top 3-10 issues)
-- ✅ **Full-featured mem0 integration:**
-  - Agent context persistence (briefing history)
-  - User preference learning (topics, teams, labels)
-  - Interaction tracking (Telegram queries, feedback)
-  - Semantic search (embeddings for similar issues)
+- ✅ **Basic agent context (MVP scope):**
+  - Agent context persistence (7-day briefing history in SQLite)
+  - NO preference learning, NO semantic search, NO embeddings (Phase 2+)
 - ✅ Telegram delivery with Markdown formatting
 
-### Tech Stack (Locked-in)
+### Tech Stack (Locked-in for MVP)
 - Python 3.11, async/await
-- Anthropic Agent SDK / Messages API
-- APScheduler (primary scheduling)
-- SQLite + WAL mode
-- mem0 (persistent memory)
-- sentence-transformers (embeddings)
-- ChromaDB (vector search)
+- Anthropic Claude Messages API (Agent SDK optional, to be validated in Week 1 spike)
+- APScheduler (ONLY scheduling mechanism)
+- SQLite + WAL mode (ONLY data store)
 - python-telegram-bot
 
-### Out of MVP
-- ❌ Web dashboard
-- ❌ Multi-user support
-- ❌ Cloud deployment (start local)
+### Out of MVP (Moved to Phase 2+)
+- ❌ mem0 / preference learning → Phase 2
+- ❌ sentence-transformers / embeddings → Phase 2
+- ❌ ChromaDB / vector search → Phase 2
+- ❌ Telegram feedback (👍/👎) → Phase 2
+- ❌ Web dashboard → Phase 3
+- ❌ Multi-user support → Phase 4+
+- ❌ Cloud deployment (start local, deploy later)
 
 ---
 
 ## Post-MVP: Conversational & Interactive
 
-### Phase 2: Telegram Bidirectional (Week 5-6)
-**Goal:** Transform Telegram into interactive interface
+### Phase 2: Learning & Bidirectional Telegram (Week 5-8)
+**Goal:** Add preference learning, semantic search, and interactive Telegram
 
-**Features:**
-- **Conversational queries:**
-  - "What's blocked?"
-  - "Show me stale issues"
-  - "What did I miss today?"
-- **Inline keyboards:**
-  - 👍/👎 feedback per issue
-  - "Show details" button → expanded view
-  - "Mark as reviewed" action
-- **Natural language commands:**
-  - "Remind me about ENG-123 tomorrow"
-  - "Set priority high on ENG-456"
-  - "Summarize last week's progress"
+**Features Added:**
+1. **Preference Learning (mem0):**
+   - Topic preferences (backend vs. frontend)
+   - Team/label prioritization
+   - Historical engagement patterns
+   - Adjusts IssueRanker based on learned prefs
 
-**mem0 Integration:**
-- Track which queries user asks most
-- Learn from 👍/👎 feedback
-- Personalize future briefings based on engagement
+2. **Semantic Search (embeddings):**
+   - sentence-transformers for issue embeddings
+   - ChromaDB for vector storage
+   - "Show me issues similar to ENG-123"
+   - Automatic duplicate detection
+
+3. **Bidirectional Telegram:**
+   - Conversational queries: "What's blocked?"
+   - Inline keyboards: 👍/👎 feedback per issue
+   - Natural language commands: "Remind me about ENG-123"
+   - Conversation state management
 
 **Implementation:**
+- Add mem0 / custom preference store
+- Integrate sentence-transformers + ChromaDB
 - Update Telegram bot with message handlers
-- Add conversation state management
-- Integrate mem0 feedback loop
-- ~20-30 hours
+- Implement feedback tracking
+- ~40-50 hours (more complex than original Phase 2)
 
 ---
 
@@ -171,12 +171,45 @@
 
 ---
 
+## MVP Go/No-Go Criteria
+
+Before proceeding from MVP to Phase 2, validate:
+
+**Must Have (Hard Requirements):**
+1. ✅ 7 consecutive days of successful briefings (99% uptime = max 1 miss)
+2. ✅ Cost < $20/month for 30 briefings (actual measured, not estimated)
+3. ✅ Briefing generation < 30 seconds for 50 issues (instrumented timing)
+4. ✅ No critical bugs in Week 1 usage (agent crashes, data loss, API failures)
+
+**Should Have (Quality Indicators):**
+5. 📊 Briefing relevance ≥ 70% (manual daily rating in journal)
+6. ⏱️ Saves ≥ 10 minutes per morning vs. manual Linear checking
+7. 🧠 Agent context continuity works (references previous briefings correctly)
+
+**Decision Gate:**
+- **All "Must Have" met → Proceed to Phase 2**
+- **≥ 3 "Must Have" met + 2 "Should Have" → Proceed with caution, document gaps**
+- **< 3 "Must Have" → Pivot or stop (MVP assumptions invalid)**
+
+**Phase 2 Go/No-Go (after 2-3 weeks):**
+- Bidirectional Telegram works reliably (queries answered correctly 80%+ of time)
+- Preference learning shows measurable improvement (relevance increases 10%+)
+- No cost explosion from added features (< $50/month)
+
+---
+
 ## Decision Log
 
-### Why Full-Featured mem0 in MVP?
-**Rationale:** AI agent can implement complex features as easily as simple ones. No reason to artificially limit scope when the architecture is already designed for it.
+### Why Reduced mem0 Scope for MVP?
+**Original Plan:** Full-featured mem0 with preference learning, embeddings, semantic search
+**Revised Plan:** Basic context only (SQLite), defer ML features to Phase 2
 
-**Trade-off:** Slightly higher Week 1 complexity, but we learn mem0 patterns immediately instead of retrofitting later.
+**Rationale:**
+- Embeddings/vectors add significant complexity (ChromaDB, model management)
+- Preference learning requires data collection period (no data on Day 1)
+- **MVP goal:** Validate core workflow first, add intelligence later
+
+**Trade-off:** Less "intelligent" MVP, but faster to implement and validate. ML features moved to Phase 2 where they have data to learn from.
 
 ### Why Telegram First, Web Second?
 **Rationale:** Telegram is zero-friction delivery (user already has app). Web dashboard adds visual value but isn't critical for core workflow.

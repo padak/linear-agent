@@ -36,6 +36,35 @@
   - **Telegram API:** Mock `python-telegram-bot` with pytest-mock
   - **SQLite:** Use in-memory database (`:memory:`) for fast tests
 
+#### SQLite Concurrency Test
+
+**Purpose:** Validate SQLite WAL mode handles concurrent writes from APScheduler scheduler and manual CLI without locking errors.
+
+**Test Scenario:**
+```python
+async def test_concurrent_writes():
+    # Start APScheduler briefing generation
+    scheduler_task = asyncio.create_task(generate_scheduled_briefing())
+
+    # Simultaneously trigger manual briefing from CLI
+    await asyncio.sleep(0.1)  # Small delay to ensure overlap
+    manual_task = asyncio.create_task(generate_manual_briefing())
+
+    # Both should complete without locking errors
+    results = await asyncio.gather(scheduler_task, manual_task)
+    assert all(r.success for r in results)
+```
+
+**Expected Behavior:**
+- No `database is locked` errors
+- Both briefings written to database successfully
+- WAL mode prevents lock contention
+
+**Test Infrastructure:**
+- Use pytest-asyncio for async test execution
+- SQLite database in WAL mode (configured in test fixtures)
+- Mock Linear/Anthropic APIs to focus on database concurrency
+
 ### End-to-End Tests
 
 - **Framework:** Manual testing for MVP (no automation)

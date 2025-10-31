@@ -59,19 +59,49 @@
 
 ## Anthropic Agent SDK Integration
 
-**Responsibility:** Generate natural language briefings from analyzed issue data using LLM reasoning.
+**Responsibility:** Generate natural language briefings from analyzed issue data using LLM reasoning. **EXPLICITLY NOT RESPONSIBLE FOR:** Scheduling (handled by APScheduler), long-term memory persistence (handled by SQLite + mem0).
 
 **Key Interfaces:**
-- `class BriefingAgent` (facade for Agent SDK)
+- `class BriefingAgent` (facade for Agent SDK or plain Claude Messages API)
   - `async def generate_briefing(issues: List[Issue], analysis: AnalysisResult) -> BriefingText`
   - `def get_token_usage() -> TokenUsageStats`
 
 **Dependencies:**
-- Anthropic Agent SDK (primary)
+- Anthropic Claude Messages API (primary) OR Anthropic Agent SDK (if Week 1 spike validates added value)
 - Issue data models
 - Prompt templates (stored in code or config)
 
-**Technology Stack:** Anthropic Agent SDK, Python 3.11, async/await
+**Technology Stack:** Anthropic Claude (Messages API), Python 3.11, async/await
+
+**Architecture Decision:** Agent SDK is **OPTIONAL** for MVP. Week 1 spike validates if SDK provides value over plain Claude Messages API.
+
+**Fallback Strategy (if Agent SDK inadequate):**
+1. **Detection Trigger:**
+   - Startup health check: Test prompt fails or times out (>30s)
+   - Runtime detection: 3 consecutive API failures
+   - Cost spike: Token usage >2x expected baseline
+
+2. **Automatic Fallback:**
+   - Switch `BriefingAgent` implementation from `AgentSDKBriefing` to `MessagesAPIBriefing`
+   - Both implement same interface: `async def generate_briefing(issues, analysis) -> BriefingText`
+   - No orchestrator changes required (interface abstraction)
+
+3. **Implementation:**
+   ```python
+   # Factory pattern for agent selection
+   def create_briefing_agent(config):
+       if config.USE_AGENT_SDK and agent_sdk_health_check():
+           return AgentSDKBriefingAgent()
+       else:
+           logger.warning("Falling back to Messages API")
+           return MessagesAPIBriefingAgent()
+   ```
+
+**Configuration:**
+- `USE_AGENT_SDK` - Boolean flag in .env (default: True, auto-fallback to False on errors)
+- `AGENT_SDK_TIMEOUT` - Health check timeout (default: 30s)
+
+**No Risk:** Both paths tested in Week 1 spike. Fallback is seamless due to interface abstraction.
 
 **Prompt Length Constraints (FR6):**
 - Prompt template MUST enforce 1-2 sentence summaries per issue
@@ -79,88 +109,64 @@
 - **Validation:** Unit tests assert response length <200 chars per issue summary. Test fails if Agent SDK generates longer summaries.
 - Fallback: If summary exceeds limit, truncate to 200 chars + "..." (handled in `BriefingAgent._validate_summary_length()`)
 
-## SemanticSearch & Learning Memory
+## Agent Context Memory (MVP Scope)
 
-**Responsibility:** Full-featured persistent memory and preference learning using mem0. Agent learns from all interactions to personalize briefings and responses.
+**Responsibility:** **MVP ONLY** - Basic agent context persistence for briefing continuity. No preference learning, no semantic search, no feedback tracking. These are Phase 2+ features.
 
 **Key Interfaces:**
-- `class SemanticIssueIndex`
-  - `async def index_issue(issue: Issue) -> None` - Generate and store embedding for issue
-  - `async def search_similar(query: str, top_k: int = 10) -> List[Issue]` - Semantic similarity search
-  - `async def find_related(issue_id: str) -> List[Issue]` - Find issues related to given issue
+- `class AgentContextManager`
+  - `async def save_briefing_context(briefing_id: int, context: Dict) -> None` - Store last briefing narrative
+  - `async def get_recent_context(days: int = 7) -> List[Dict]` - Retrieve recent briefing contexts
 
-- `class PreferenceLearner` (uses mem0)
-  - `async def observe_interaction(issue_id: str, action: str, context: Dict) -> None` - Track user engagement
-  - `async def get_user_interests() -> PreferenceProfile` - Retrieve learned preferences
-  - `async def get_agent_context(days: int = 7) -> AgentMemory` - Retrieve recent briefing history and narrative
+**MVP Scope (Week 1-4):**
+- **ONLY Agent Context Memory:** Last 7 days of briefing summaries stored in SQLite `briefings.agent_context` JSON column
+- **Purpose:** Enable continuity ("ENG-123 was flagged yesterday as stale, today it's STILL stale")
+- **No machine learning, no embeddings, no preference tracking**
 
-- `class FeedbackTracker`
-  - `async def record_feedback(issue_id: str, feedback: Literal["relevant", "irrelevant"]) -> None` - Track Telegram inline button clicks
-  - `async def get_feedback_stats() -> Dict[str, float]` - Retrieve feedback metrics for learning
+**Dependencies (MVP):**
+- SQLite (existing) - stores context in `briefings` table `agent_context` JSON field
+- No additional libraries needed
 
-**Dependencies:**
-- `mem0` - Persistent memory layer for agent context and user preferences
-- `sentence-transformers` - Generate embeddings for Linear issue content (all-MiniLM-L6-v2 model)
-- `chromadb` - Vector database for similarity search and semantic queries
+**Technology Stack:** Pure Python + SQLite, no ML dependencies
 
-**Technology Stack:** Python, mem0, sentence-transformers, ChromaDB, numpy
+**Phase 2+ Features (OUT OF MVP SCOPE):**
+The following features are **explicitly deferred** to Phase 2-3:
 
-**Learning Capabilities:**
-1. **Agent Context Memory:**
-   - Stores last 7 days of briefing narratives
-   - Tracks which issues were flagged and why
-   - Enables continuity: "Yesterday I said ENG-123 was stale, today it's STILL stale → escalate"
+1. **User Preference Learning (Phase 2):**
+   - Topic preferences (backend vs. frontend)
+   - Team/label prioritization
+   - Historical engagement patterns
+   - **Dependencies:** mem0 or custom preference store
 
-2. **User Preference Learning:**
-   - Topics: backend (40%), API (30%), frontend (20%), infra (10%)
-   - Teams: most engaged with @api-team, @backend-team
-   - Labels: prioritizes "security", "performance" over "nice-to-have"
-   - Historical patterns: user reads blocked issues first, skips documentation tasks
+2. **Semantic Search (Phase 2):**
+   - Embeddings for issue similarity
+   - Related issue detection
+   - Duplicate flagging
+   - **Dependencies:** sentence-transformers, ChromaDB
 
-3. **Interaction Tracking:**
-   - Telegram queries: "What's blocked?" → learns user cares about blockers
-   - Inline feedback: 👍/👎 per issue → refines relevance scoring
-   - Read receipts: which issues user actually opened in Linear → implicit feedback
-   - Conversation history: maintains context across multi-turn dialogues
+3. **Feedback Tracking (Phase 2):**
+   - Telegram inline buttons (👍/👎)
+   - Feedback-driven ranking adjustments
+   - **Dependencies:** Bidirectional Telegram bot
 
-4. **Semantic Search:**
-   - Find similar issues based on embeddings
-   - "Show me issues like ENG-123" → returns semantically similar issues
-   - Cluster analysis: group related issues automatically
-   - Duplicate detection: flag potential duplicates
+4. **Advanced Context (Phase 3):**
+   - Conversation history across multiple turns
+   - Read receipt tracking
+   - Implicit feedback from user behavior
 
-**Integration with Agent SDK:**
-- mem0 context passed to Claude as system prompt: "User preferences: [mem0 data]"
-- Agent uses preferences to re-rank IssueRanker output
-- Agent tailors language based on user history (technical vs. managerial tone)
-- Agent remembers unresolved follow-ups: "Last week you asked about X, here's the update"
+**Rationale for MVP Reduction:**
+- Embedding/vector search adds significant complexity (ChromaDB, model management)
+- Preference learning requires data collection period (no data on Day 1)
+- Feedback tracking requires Phase 2 bidirectional Telegram (not MVP)
+- **MVP goal:** Validate core workflow (fetch → analyze → brief) with minimal dependencies
 
-**Data Storage:**
-- mem0 memory graph: stores all memories with timestamps and relationships
-- ChromaDB: stores issue embeddings (384-dim vectors from sentence-transformers)
-- SQLite: stores feedback data (`issue_feedback` table with ratings)
-
-**Example Flow:**
-```python
-# Morning briefing generation
-agent_memory = mem0.get_agent_context(days=7)
-user_prefs = mem0.get_user_interests()
-
-# Agent sees:
-# - "Yesterday flagged ENG-123 as stale (4 days)"
-# - "User engages with backend issues 2x more than frontend"
-# - "User gave 👍 to security-labeled issues last 3 times"
-
-# Agent adjusts:
-# - Prioritizes backend issues higher
-# - Flags security issues even if not top-ranked
-# - Continues narrative: "ENG-123 still stale, now 5 days"
-```
-
-**Configuration:**
-- `MEM0_API_KEY` - mem0 API key (if using hosted)
-- `CHROMADB_PATH` - ChromaDB persistence directory (default: `~/.linear_chief/chromadb`)
-- `EMBEDDING_MODEL` - sentence-transformers model (default: `all-MiniLM-L6-v2`)
+**Migration Path to Phase 2:**
+When ready for preference learning:
+1. Add `mem0` or custom preference store
+2. Implement `PreferenceLearner` class
+3. Integrate sentence-transformers for embeddings
+4. Deploy ChromaDB for vector search
+5. Update `IssueRanker` to incorporate learned preferences
 
 ## Telegram Bot
 
@@ -239,7 +245,12 @@ user_prefs = mem0.get_user_interests()
 
 **Technology Stack:** APScheduler with CronTrigger, Python asyncio
 
-**Design Decision:** APScheduler is the **primary** scheduling mechanism. Anthropic Agent SDK native scheduling (if available) is a **stretch goal** for future optimization, NOT a week-1 requirement. This de-risks the MVP and ensures we can proceed with Epics 2-3 regardless of Agent SDK capabilities.
+**Architecture Decision:** APScheduler is the **ONLY** scheduling mechanism for MVP. Agent SDK (if used) is **strictly for inference/reasoning**, NOT for scheduling or orchestration. This eliminates architectural ambiguity and de-risks the MVP.
+
+**Rationale:**
+- APScheduler is proven, well-documented, and fits the use case perfectly
+- Anthropic Agent SDK's scheduling capabilities (if any) are unvalidated and add unnecessary risk
+- Separation of concerns: scheduling logic is independent of LLM inference
 
 **Timezone Handling:**
 - User configures `LOCAL_TIMEZONE` in `.env` (e.g., "America/New_York", "Europe/Prague")
@@ -247,10 +258,7 @@ user_prefs = mem0.get_user_interests()
 - DST transitions handled automatically by pytz
 - Test suite includes DST boundary test cases
 
-**Contingency Plan (if Agent SDK spike fails):**
-- Fallback: Use APScheduler + plain Claude Messages API (not Agent SDK)
-- Cron wrapper alternative: systemd timer + Python script
-- Both options validated in Week 1 spike
+**No Contingency Plan Needed:** APScheduler is the locked-in choice. If performance/features are inadequate (highly unlikely), fallback to systemd timer + Python script is trivial.
 
 ## Component Diagrams
 
