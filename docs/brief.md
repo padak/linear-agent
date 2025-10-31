@@ -81,10 +81,13 @@ This problem is ideal for exploring agent architectures because it requires:
 4. **Semantic Search:** How to use embeddings effectively for preference learning and issue prioritization?
 5. **Error Handling:** How to build resilient agents that handle API failures, rate limits, and edge cases gracefully?
 
-**Locked-in decisions (no longer "open questions"):**
+**Locked-in Technology Stack:**
+- ✅ **Agent Framework:** Anthropic Agent SDK (LLM reasoning and briefing generation)
+- ✅ **Memory Layer:** mem0 (persistent agent context + user preference learning)
+- ✅ **Vector Store:** ChromaDB (semantic search and embeddings)
+- ✅ **Embeddings:** sentence-transformers (all-MiniLM-L6-v2 model)
 - ✅ **Scheduling:** APScheduler (cron-like triggers at 9 AM daily)
-- ✅ **Memory:** mem0 (persistent agent context + user preferences)
-- ✅ **LLM:** Anthropic Claude via Messages API (briefing generation)
+- ✅ **Linear API:** httpx with hand-written GraphQL queries
 
 ### Secondary: Real-World AI System Design
 
@@ -92,16 +95,6 @@ This problem is ideal for exploring agent architectures because it requires:
 - **Context Management:** Strategies for staying within context windows while tracking many issues
 - **Evaluation:** How to measure and improve "briefing quality" without labeled datasets
 - **Observability:** Logging, monitoring, and debugging autonomous agents in production
-
-### Validation Before Full Build
-
-**Week 1 spike validates these technical assumptions:**
-- [ ] Prompt template produces quality briefings (1-2 sentences per issue)
-- [ ] Cost modeling with real data: measure tokens for 30 briefings with 50 issues (target: <$20/month)
-- [ ] Linear API rate limits: confirm 100 req/min allows our polling strategy
-- [ ] mem0 integration: verify memory persistence and retrieval works as expected
-
-**Week 1 spike goal:** Prototype working briefing generator using locked-in tech stack (APScheduler + mem0 + Claude). Validates cost and quality assumptions before building production features.
 
 ---
 
@@ -166,23 +159,27 @@ Like a human chief of staff, the agent:
 
 ### High-Level Vision for the Product
 
-**Phase 1 (MVP):** Personal Chief of Staff
+**Full-Featured System (No Artificial Phases):**
+
+**Core Capabilities:**
 - Monitors issues assigned to you or that you're watching
-- Delivers 2x daily briefings with momentum analysis
-- Supports basic conversational queries
-- Single-user deployment
+- Learns your preferences through interaction (topics, teams, labels)
+- Semantic search across all issues using embeddings
+- Delivers intelligent briefings with momentum analysis and learned prioritization
+- Supports conversational queries via Telegram
+- Remembers context across briefings and conversations
+- Tracks feedback (👍/👎) to improve relevance
 
-**Phase 2:** Team Intelligence Layer
+**Single-User MVP Scope:**
+- Personal deployment (local or cloud VPS)
+- Focus on individual workflow optimization
+- No team collaboration features (yet)
+
+**Future Expansion Opportunities (Post-MVP):**
 - Multi-user support with role-based perspectives
-- Team-level insights: "Your team has 5 blocked issues"
-- Escalation routing: automatically notifies relevant people
-- Shared agent memory across team members
-
-**Phase 3:** Strategic Intelligence Platform
-- Cross-project pattern recognition
-- Predictive analytics: "This epic is likely to miss deadline based on current velocity"
-- Integration with other tools (GitHub, Slack, Jira)
-- Enterprise deployment model
+- Team-level insights and escalation routing
+- Predictive analytics and cross-project pattern recognition
+- Integration with GitHub, Slack, Jira
 
 ---
 
@@ -253,33 +250,41 @@ Success metrics:
 
 ## MVP Scope
 
-### Simplified Scope (Based on Codex Feedback)
+### Full-Featured MVP (AI Agent Implementation = Hours, Not Weeks)
 
-**Codex Warning:** Original scope (tracking + analytics + briefings + conversation + autonomous hosting) in 40-80 hours is unrealistic. **Focus on ONE success workflow first.**
+**Philosophy:** With AI agent-assisted implementation, we can build full-featured system from day 1. No artificial limitations or "Phase 2" deferrals.
 
-**MVP v1: Morning Digest Only**
+**Core MVP Features:**
 
-- **Linear Issue Tracking:** Fetch all issues assigned to you or explicitly watched
-- **Single Daily Briefing:** One morning briefing (9:00 AM) delivered via Telegram with:
-  - Issues with activity in last 24 hours (comments, status changes)
-  - Issues marked as "Blocked" (explicit label detection)
-  - Issues stale for 3+ days (simple heuristic: no updates, still "In Progress")
-  - Brief 1-2 sentence summary per flagged issue
-  - **Ranking by relevance:** Top 3-10 issues ranked using IssueRanker scoring
-- **Preference Learning (mem0):** Agent tracks which issues you engage with and learns your interests:
-  - Topic preferences (backend vs. frontend, features vs. bugs)
-  - Team/project focus areas
-  - Historical briefing quality feedback
-  - Semantic search using embeddings to find similar issues
-- **Simple Scheduling:** APScheduler (locked-in decision, not Agent SDK native)
-- **Local Development First:** Run on local machine before deploying to cloud
-- **Manual trigger capability:** Script to generate on-demand briefing for testing
+- **Linear Issue Tracking:** Fetch all issues assigned to you or explicitly watched using httpx + GraphQL
+- **Intelligent Briefings:** Daily briefings (9:00 AM) delivered via Telegram with:
+  - Issues with activity in last 24 hours
+  - Blocked issues flagged explicitly
+  - Stale issues (3+ days no updates, still "In Progress")
+  - Concise 1-2 sentence summaries per issue
+  - Learned prioritization using preference data
 
-**Explicitly OUT of MVP v1:**
-- ❌ Conversational queries (add in v2 after briefings work)
-- ❌ Twice-daily briefings (start with morning only)
-- ❌ Cloud deployment (validate locally first)
-- ❌ Advanced momentum analysis (use rule-based heuristics + semantic similarity)
+- **Full Memory & Learning (mem0):**
+  - Agent context memory: last 7 days of briefing narratives
+  - User preference learning: topics, teams, labels, historical patterns
+  - Semantic search: find similar issues using embeddings
+  - Feedback tracking: 👍/👎 per issue for refinement
+  - Conversation history: multi-turn dialogue context
+
+- **Conversational Interface:** Ask questions via Telegram
+  - "What's blocked?"
+  - "Show me stale backend issues"
+  - "Issues similar to ENG-123"
+  - Agent responds with context from mem0
+
+- **Semantic Search:** ChromaDB + sentence-transformers
+  - 384-dim embeddings per issue
+  - Similarity search and clustering
+  - Duplicate detection
+
+- **Scheduling:** APScheduler for cron-like daily triggers
+- **Local Development:** Run on local machine before cloud deployment
+- **Manual Trigger:** CLI command for on-demand briefings
 
 ### Out of Scope for MVP
 
@@ -421,15 +426,17 @@ linear-chief-of-staff/
 ### Constraints
 
 **Budget:**
-- **Infrastructure:** ~$25-50/month (Digital Ocean/EC2 + storage)
-- **Anthropic API costs:** $50-200/month estimated (depends on usage patterns and context size)
-- **Total MVP budget:** <$300/month operational costs
-- **Development time:** Solo project, evenings/weekends (~40-80 hours total for MVP)
+- **Infrastructure:** ~$12-24/month (Digital Ocean Droplet or local machine initially)
+- **Anthropic API costs:** <$20/month realistic target
+  - Calculation: 30 briefings × ~2K tokens × $0.003/1K tokens = $1.80/month base
+  - With conversational queries and experimentation: <$20/month buffer
+- **Total MVP budget:** <$50/month operational costs
+- **Development time:** Solo project with AI agent assistance (~6-10 hours total for MVP implementation)
 
 **Timeline:**
-- **MVP target:** 4-6 weeks from start to first working version
-- **Phase 1 refinement:** Additional 2-4 weeks for polish and iteration
-- **Phase 2 (multi-user):** 3-6 months post-MVP
+- **MVP target:** Days, not weeks. AI agent-assisted implementation dramatically accelerates development
+- **Working prototype:** 6-10 hours of focused implementation with AI agent
+- **No artificial phases:** Full-featured system built from start
 
 **Resources:**
 - **Team:** Solo developer (you) for MVP
@@ -458,75 +465,18 @@ linear-chief-of-staff/
 
 ---
 
-## Risks & Open Questions
+## Implementation Notes
 
-### Critical Technical Risks (From Codex Analysis)
+### Monitoring During Development
 
-**🔴 HIGH RISK: Agent SDK Capabilities Unknown**
-- **Issue:** SDK is treated as turnkey orchestrator, but scheduling, persistent memory, and low-latency responses are "open questions" in the brief
-- **Impact:** High - may require significant custom infrastructure, invalidating architecture assumptions
-- **Mitigation:**
-  - Week 1 spike: Build minimal agent that generates one briefing
-  - Validate: Can SDK schedule tasks? How does memory work across invocations?
-  - Fallback: External orchestration (cron) + custom state management (SQLite)
+While we have locked-in technology decisions, we'll monitor these metrics during implementation:
 
-**🔴 HIGH RISK: Cost Model Unvalidated**
-- **Issue:** No prompt-size modeling exists; single verbose briefing could blow context window and exceed budget
-- **Impact:** Could make project economically non-viable (target: <$100/month)
-- **Mitigation:**
-  - Instrument token usage from Day 1
-  - Test with realistic issue counts (50+ issues)
-  - Set hard budget alerts ($50, $75, $100)
-  - Optimize: Use caching, prompt compression, delta queries
+- **Token Usage:** Track actual costs per briefing to validate <$20/month target
+- **Linear API Rate Limits:** Monitor request patterns and adjust polling if needed
+- **Briefing Quality:** Collect feedback (👍/👎) to refine relevance scoring
+- **State Management:** Validate SQLite + mem0 performance with realistic data volumes
 
-**🟡 MEDIUM RISK: Linear API Rate Limits**
-- **Issue:** Polling 50+ issues every 5-15 minutes may exceed rate limits
-- **Impact:** Could force less frequent polling or complex caching
-- **Mitigation:**
-  - Research Linear API limits in Week 1
-  - Use delta queries (only fetch changed issues)
-  - Start with 15-minute polling, optimize later
-
-**🟡 MEDIUM RISK: Briefing Quality**
-- **Issue:** Agent may surface irrelevant issues or miss important ones; no feedback loop planned
-- **Impact:** Low personal cost (you'll just ignore bad briefings), but limits learning
-- **Mitigation:**
-  - Start with simple heuristics (blocked, stale, active)
-  - Manually review first 2 weeks of briefings
-  - Add explicit feedback mechanism in v2
-
-**🟢 LOW RISK: State Management**
-- **Issue:** Tracking "what's changed since last briefing" may be complex
-- **Impact:** Manageable with simple approaches
-- **Mitigation:** Use Linear's `updatedAt` timestamps + SQLite log of seen states
-
-### Open Questions (To Answer Through Building)
-
-**Agent SDK Architecture:**
-- Does SDK support scheduled/cron-like execution, or only request-response?
-- How does persistent memory work across invocations?
-- What's the best pattern for long-running agents vs. triggered agents?
-- How to structure "tools" for Linear API and Telegram?
-
-**Cost & Performance:**
-- Actual token usage per briefing generation? (estimate: 5K-20K tokens?)
-- How to optimize context: summarize old issues, prune irrelevant data?
-- Can we cache issue data to reduce API calls?
-
-**Technical Implementation:**
-- Linear GraphQL API directly or official Python SDK?
-- How to handle pagination for 100+ watched issues?
-- SQLite vs. PostgreSQL for state? (SQLite for MVP simplicity)
-- Deployment: Local script, systemd service, or cloud function?
-
-**Briefing UX:**
-- Optimal length: 5 issues? 15 issues? Variable?
-- Include "no activity" sections or only highlight changes?
-- One-line summaries vs. multi-paragraph context?
-
-**Note:** These questions will be answered iteratively through building, not upfront research. The goal is to learn by doing.
-
-### Areas Needing Further Research
+### Areas for Continuous Learning
 
 **Anthropic Agent SDK Deep Dive:**
 - Architecture patterns for autonomous agents (long-running processes, scheduled tasks)
@@ -558,61 +508,57 @@ linear-chief-of-staff/
 
 ## Next Steps
 
-### Week 1: Validation Spike (Critical)
+### Implementation with AI Agent (6-10 Hours Total)
 
-**Goal:** Validate core Agent SDK assumptions before committing to full build.
+**Approach:** Build full-featured system directly with AI agent assistance. No validation spike, no phased rollout.
 
-**Tasks:**
-1. **Agent SDK Deep Dive** (2-3 hours)
-   - Read documentation cover-to-cover
-   - Find examples of scheduling/long-running agents
-   - Understand memory/state management patterns
-   - Identify cost optimization strategies
+**Session 1: Foundation & Setup (2 hours)**
+- Project initialization with Poetry
+- Dependency installation: anthropic, mem0ai, chromadb, sentence-transformers, httpx, python-telegram-bot, sqlalchemy, apscheduler
+- Project structure setup following architecture docs
+- Configuration management (.env setup)
 
-2. **Minimal Prototype** (3-4 hours)
-   - Set up Python environment with Anthropic SDK
-   - Fetch issues from Linear API (use your personal API key)
-   - Build single-prompt agent: "Analyze these Linear issues and generate a brief"
-   - Measure token usage
+**Session 2: Core Integration (2-3 hours)**
+- Linear API client with httpx + GraphQL queries
+- Agent SDK integration with prompt templates
+- mem0 memory layer setup
+- ChromaDB vector store initialization
+- Telegram bot basic setup
 
-3. **Cost & Feasibility Check** (1 hour)
-   - Calculate actual token cost for 50 issues
-   - Validate: Can we stay under $100/month?
-   - Research Linear API rate limits
-   - Document findings and blockers
+**Session 3: Intelligence & Memory (2 hours)**
+- Issue analysis logic (stagnation, blocked, activity)
+- IssueRanker with learned preferences
+- Semantic search integration
+- Feedback tracking setup
 
-**Decision Point:** If spike reveals showstoppers (SDK can't schedule, costs are 10x budget, etc.), pivot approach or simplify scope further.
+**Session 4: Orchestration & Testing (1-2 hours)**
+- APScheduler cron setup
+- End-to-end workflow testing
+- Manual briefing trigger CLI
+- Cost monitoring dashboard
 
-### Week 2-3: MVP Build (If Spike Succeeds)
+**Session 5: Polish & Deploy (1 hour)**
+- Error handling refinement
+- Logging configuration
+- Local deployment and validation
+- Documentation updates
 
-1. **Core System** (Week 2)
-   - Linear API integration (fetch watched/assigned issues)
-   - Telegram bot setup (send briefings)
-   - Simple scheduling (cron or Agent SDK if supported)
-   - SQLite for state tracking
+### Continuous Learning
 
-2. **Intelligence Layer** (Week 3)
-   - Implement stagnation detection (3+ days no updates)
-   - Blocked issue detection (label-based)
-   - Briefing generation with Agent SDK
-   - Manual testing and iteration
+Throughout implementation, document:
+- Agent SDK patterns discovered
+- Token usage and cost optimization strategies
+- Memory management learnings
+- User experience insights
 
-### Week 4: Production & Learning
+### Success Metrics
 
-- Deploy to cloud (EC2/Digital Ocean) or run locally
-- Use daily for 1 week
-- Document learnings: what worked, what didn't, SDK limitations
-- Measure: token costs, API usage, time saved
-
-### Decision Point: Continue or Pivot?
-
-After 4 weeks, evaluate:
-- **Did I learn Agent SDK patterns?** (primary goal)
-- **Does it save time?** (secondary goal)
-- **What would I do differently?** (future projects)
-
-If successful: Consider v2 features (queries, enhanced analysis)
-If not: Document lessons and move on
+After 1 week of daily use:
+- ✅ Saves 10+ minutes per morning vs. manual Linear checking
+- ✅ Briefings are relevant and actionable
+- ✅ Costs stay under $20/month
+- ✅ System runs reliably without intervention
+- ✅ Learned valuable Agent SDK patterns for future projects
 
 ---
 

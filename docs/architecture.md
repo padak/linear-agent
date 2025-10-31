@@ -91,7 +91,7 @@ graph TD
 - **Repository Pattern:** Abstract SQLite data access behind clean interfaces - _Rationale:_ Enables testing with mock repos and future database migration if needed
 - **Async/Await Pattern:** Python asyncio for non-blocking I/O - _Rationale:_ Concurrent API calls (Linear + Anthropic + Telegram) without thread complexity
 - **Retry with Exponential Backoff:** Use `tenacity` library for resilient API calls - _Rationale:_ Handle transient failures gracefully without manual retry logic
-- **Strategy Pattern for Scheduling:** Abstract scheduler interface (APScheduler or Agent SDK native) - _Rationale:_ Week 1 spike will determine best approach, design supports both
+- **Clear Separation of Concerns:** APScheduler for cron-like scheduling, Agent SDK for LLM reasoning - _Rationale:_ Each tool does what it's best at, no overlap
 - **Facade Pattern for Agent SDK:** Wrap Agent SDK calls behind `BriefingAgent` interface - _Rationale:_ Isolate SDK-specific details, simplify testing with mocks
 - **Template Method for Intelligence Analysis:** Base `IssueAnalyzer` with concrete implementations (`StagnationAnalyzer`, `BlockedIssueDetector`) - _Rationale:_ Extensible analysis logic without modifying orchestrator
 
@@ -113,13 +113,15 @@ graph TD
 |----------|-----------|---------|---------|-----------|
 | **Language** | Python | 3.11+ | Primary development language | Modern type hints, async/await, Agent SDK support |
 | **Runtime** | CPython | 3.11+ | Python interpreter | Standard implementation, best compatibility |
-| **Agent Framework** | Anthropic Agent SDK | Latest | Core intelligence and briefing generation | Primary learning objective, handles LLM reasoning |
-| **Linear API Client** | `gql` or Linear Python SDK | TBD (Week 1) | GraphQL queries to Linear | Decision pending SDK quality research |
+| **Agent Framework** | Anthropic Agent SDK | Latest | Core intelligence and briefing generation | Primary learning objective, handles LLM reasoning (**locked-in decision**) |
+| **Memory Layer** | mem0 | Latest | Persistent agent memory and user preferences | Enables learning, context retention, personalization (**locked-in decision**) |
+| **Vector Store** | ChromaDB | 0.4.x | Store and search issue embeddings | Lightweight vector DB for semantic search (**locked-in decision**) |
+| **Embeddings** | sentence-transformers | 2.x | Generate semantic embeddings for issues | all-MiniLM-L6-v2 model for similarity search (**locked-in decision**) |
+| **Linear API Client** | `httpx` | 0.26.x | GraphQL queries to Linear | Hand-written queries, simpler than SDK (**locked-in decision**) |
 | **Telegram Bot** | `python-telegram-bot` | 20.x | Telegram Bot API integration | Mature, well-documented, async support |
-| **HTTP Client** | `httpx` | 0.26.x | Async HTTP requests | Modern async client, better than requests for concurrent calls |
 | **Database** | SQLite | 3.x | Local state persistence | File-based, no server, perfect for single-user MVP |
 | **ORM** | SQLAlchemy | 2.0+ | Database abstraction | Type-safe, supports migrations, async support |
-| **Scheduler** | APScheduler | 3.10.x | Scheduled task execution | Fallback if Agent SDK lacks native scheduling |
+| **Scheduler** | APScheduler | 3.10.x | Scheduled task execution | Cron-like scheduling, Agent SDK handles reasoning not scheduling (**locked-in decision**) |
 | **Config Management** | python-decouple | 3.8+ | Environment variable management | Separates config from code, `.env` support |
 | **Logging** | python-json-logger | 2.0.x | Structured JSON logging | Parseable logs for analysis and debugging |
 | **Retry Logic** | tenacity | 8.2.x | Exponential backoff retries | Handles transient API failures gracefully |
@@ -132,9 +134,6 @@ graph TD
 | **Dependency Management** | poetry | 1.7.x | Reproducible builds | Better than pip, lockfile support, virtual envs |
 | **CI/CD** | GitHub Actions | N/A | Automated testing (future) | Free, integrated with GitHub |
 | **Deployment** | systemd | System default | Process management (future) | Standard Linux service manager |
-| **Embeddings** | sentence-transformers | 2.x | Generate semantic embeddings for Linear issues | Enables semantic search and preference learning (all-MiniLM-L6-v2 model) |
-| **Memory Layer** | mem0 | Latest | Persistent agent memory and user preference learning | Replaces custom DB-based context, provides memory graph for tracking user interactions and preferences |
-| **Vector Store** | ChromaDB | 0.4.x | Store and search issue embeddings | Lightweight vector DB for similarity search (alternative: pgvector if migrating to PostgreSQL) |
 
 ---
 
@@ -238,29 +237,31 @@ graph TD
 
 ### Anthropic Agent SDK Integration
 
-**Responsibility:** Generate natural language briefings from analyzed issue data using LLM reasoning.
+**Responsibility:** Generate natural language briefings from analyzed issue data using LLM reasoning with access to agent memory and user preferences. **EXPLICITLY NOT RESPONSIBLE FOR:** Scheduling (handled by APScheduler).
 
 **Key Interfaces:**
-- `class BriefingAgent` (facade for Agent SDK)
-  - `async def generate_briefing(issues: List[Issue], analysis: AnalysisResult) -> BriefingText`
+- `class BriefingAgent`
+  - `async def generate_briefing(issues: List[Issue], analysis: AnalysisResult, context: AgentMemory) -> BriefingText`
   - `def get_token_usage() -> TokenUsageStats`
 
 **Dependencies:**
-- Anthropic Agent SDK (primary)
+- Anthropic Agent SDK (**locked-in decision**)
+- mem0 for persistent agent memory
 - Issue data models
-- Prompt templates (stored in code or config)
+- Prompt templates (stored in `docs/prompts/`)
 
 **Technology Stack:** Anthropic Agent SDK, Python 3.11, async/await
 
-**Prompt Length Constraints (FR6):**
-- Prompt template MUST enforce 1-2 sentence summaries per issue
-- Example instruction: "Summarize each issue in maximum 2 sentences (200 characters). Focus on current status and next action needed."
-- **Validation:** Unit tests assert response length <200 chars per issue summary. Test fails if Agent SDK generates longer summaries.
-- Fallback: If summary exceeds limit, truncate to 200 chars + "..." (handled in `BriefingAgent._validate_summary_length()`)
+**Architecture Decision:** Agent SDK is the **PRIMARY and ONLY** LLM integration. No fallback mechanisms, no Messages API alternative. This decision is final.
 
-### SemanticSearch & Learning Memory
+**Prompt Configuration:**
+- Prompt template enforces concise summaries (1-2 sentences per issue)
+- Example instruction: "Summarize each issue in maximum 2 sentences. Focus on current status and next action needed."
+- Agent receives context from mem0: previous briefings, user preferences, conversation history
 
-**Responsibility:** Full-featured persistent memory and preference learning using mem0. Agent learns from all interactions to personalize briefings and responses.
+### Memory & Learning System
+
+**Responsibility:** Persistent agent memory, user preference learning, and semantic search using mem0 and ChromaDB. Enables the agent to remember context, learn from interactions, and personalize briefings.
 
 **Key Interfaces:**
 - `class SemanticIssueIndex`
@@ -418,18 +419,18 @@ user_prefs = mem0.get_user_interests()
 
 **Technology Stack:** APScheduler with CronTrigger, Python asyncio
 
-**Design Decision:** APScheduler is the **primary** scheduling mechanism. Anthropic Agent SDK native scheduling (if available) is a **stretch goal** for future optimization, NOT a week-1 requirement. This de-risks the MVP and ensures we can proceed with Epics 2-3 regardless of Agent SDK capabilities.
+**Design Decision:** APScheduler is the **ONLY** scheduling mechanism (**locked-in decision**). Agent SDK handles LLM reasoning, not cron-like scheduling. Clear separation of concerns.
+
+**Rationale:**
+- APScheduler is proven, well-documented, perfect for this use case
+- Agent SDK's strength is autonomous reasoning, not time-based triggers
+- Separation of concerns: scheduling logic is independent of LLM inference
 
 **Timezone Handling:**
 - User configures `LOCAL_TIMEZONE` in `.env` (e.g., "America/New_York", "Europe/Prague")
 - Scheduler uses `pytz` to convert to system time
 - DST transitions handled automatically by pytz
 - Test suite includes DST boundary test cases
-
-**Contingency Plan (if Agent SDK spike fails):**
-- Fallback: Use APScheduler + plain Claude Messages API (not Agent SDK)
-- Cron wrapper alternative: systemd timer + Python script
-- Both options validated in Week 1 spike
 
 ### Component Diagrams
 
@@ -476,7 +477,7 @@ C4Container
 - **Documentation:** https://developers.linear.app/docs/graphql/working-with-the-graphql-api
 - **Base URL(s):** `https://api.linear.app/graphql`
 - **Authentication:** Personal API key (header: `Authorization: Bearer <token>`) or OAuth2 (future)
-- **Rate Limits:** 100 requests per minute per API key (to be validated in Week 1 spike - Linear API docs were inaccessible during architecture phase)
+- **Rate Limits:** 100 requests per minute per API key (will monitor during implementation and adjust polling strategy if needed)
 
 **Key Endpoints Used:**
 - `POST /graphql` - Main query endpoint
@@ -1072,13 +1073,13 @@ Key architecture decisions for your implementation:
 2. **Project structure follows the Source Tree section** - create directories as specified
 3. **All external API clients must use tenacity retry decorator** - see Error Handling Strategy
 4. **SQLAlchemy async engine** - use `create_async_engine` for async/await support
-5. **Week 1 spike focus** - validate Anthropic Agent SDK capabilities before building full orchestrator
+5. **Memory stack is locked-in** - mem0 + ChromaDB + sentence-transformers from start
 
 Start with:
 ```bash
 poetry init
-poetry add anthropic httpx python-telegram-bot sqlalchemy python-decouple python-json-logger tenacity
-poetry add --group dev pytest pytest-asyncio pytest-mock mypy black ruff
+poetry add anthropic mem0ai chromadb sentence-transformers httpx python-telegram-bot sqlalchemy python-decouple python-json-logger tenacity apscheduler pytz
+poetry add --group dev pytest pytest-asyncio pytest-mock pytest-httpx mypy black ruff
 ```
 
-Refer to `docs/prd/epic-1-foundation-agent-sdk-validation-spike.md` for story details.
+Refer to `docs/prd.md` for epic and story details.

@@ -51,7 +51,7 @@ The timing is ideal because Anthropic's Agent SDK (2024-2025) represents a signi
 ### Non-Functional Requirements
 
 - **NFR1:** Briefing generation SHALL complete in under 30 seconds for up to 50 tracked issues
-- **NFR2:** System SHALL stay within $100/month budget for Anthropic API costs
+- **NFR2:** System SHALL stay within $20/month budget for Anthropic API costs (realistic target based on 30 briefings × ~2K tokens)
 - **NFR3:** System SHALL run on local development machine (macOS/Linux) before cloud deployment
 - **NFR4:** System SHALL use Python 3.11+ as primary implementation language
 - **NFR5:** System SHALL store API keys securely using environment variables (no hardcoded secrets)
@@ -149,20 +149,15 @@ Minimal. Use emoji sparingly (🌅 for morning, ⚠️ for blocked, 🕐 for sta
 - **Code Quality:** Use `black` for formatting, `mypy` for type checking, `pytest` for testing
 - **Dependency Management:** Use `poetry` or `pip-tools` for reproducible builds
 - **NO Docker for MVP:** Local Python environment is sufficient for learning and testing
-
-**Critical Week 1 Validation Items:**
-- Confirm Anthropic Agent SDK supports scheduled execution OR design external orchestration
-- Validate token usage stays within budget (<$100/month target)
-- Research Linear API rate limits and pagination strategies
-- Test SQLite performance with 50+ issues and 7+ days of history
+- **Cost Tracking:** Monitor token usage to validate <$20/month target during implementation
 
 ---
 
 ## Epic List
 
-### Epic 1: Foundation & Agent SDK Validation Spike
+### Epic 1: Foundation & Core Setup
 
-**Goal:** Validate that Anthropic Agent SDK can handle the core use case (generate briefing from Linear issues) and establish project foundation. Deliver a working prototype that can be manually triggered to produce a basic briefing.
+**Goal:** Establish project foundation with locked-in technology stack (Agent SDK + mem0 + ChromaDB) and implement core data pipelines. Deliver working integration of Linear API, Agent SDK, and memory layer.
 
 ### Epic 2: Production-Ready Morning Digest
 
@@ -174,11 +169,11 @@ Minimal. Use emoji sparingly (🌅 for morning, ⚠️ for blocked, 🕐 for sta
 
 ---
 
-## Epic 1: Foundation & Agent SDK Validation Spike
+## Epic 1: Foundation & Core Setup
 
 **Expanded Goal:**
 
-Set up the development environment, integrate Anthropic Agent SDK, and validate the core hypothesis: can the SDK reason about Linear issues to generate a useful briefing? This epic focuses on learning and de-risking technical unknowns before investing in production-ready infrastructure. Deliverable is a working Python script that fetches real Linear issues and produces a briefing using the Agent SDK.
+Set up the development environment with locked-in technology stack (Agent SDK, mem0, ChromaDB, sentence-transformers). Integrate Linear API, implement memory layer, and create working briefing generation pipeline. Deliverable is end-to-end data flow: Linear issues → Intelligence analysis → Agent SDK + mem0 → Briefing output.
 
 ### Story 1.1: Project Setup and Development Environment
 
@@ -187,8 +182,8 @@ Set up the development environment, integrate Anthropic Agent SDK, and validate 
 **so that** I can begin prototyping without environment issues.
 
 **Acceptance Criteria:**
-1. Python 3.11+ virtual environment created using `venv` or `poetry`
-2. `pyproject.toml` or `requirements.txt` includes: `anthropic`, `gql` (or Linear SDK), `python-decouple`, `pytest`
+1. Python 3.11+ virtual environment created using `poetry`
+2. `pyproject.toml` includes: `anthropic`, `mem0ai`, `chromadb`, `sentence-transformers`, `httpx`, `python-telegram-bot`, `sqlalchemy`, `python-decouple`, `apscheduler`, `pytest`
 3. `.env.example` file documents required environment variables: `ANTHROPIC_API_KEY`, `LINEAR_API_KEY`, `TELEGRAM_BOT_TOKEN`
 4. `.gitignore` configured to exclude `.env`, `__pycache__`, `.pytest_cache`, `*.db`
 5. Project structure created with directories: `src/linear_chief/`, `tests/`, `docs/`, `config/`
@@ -226,21 +221,7 @@ Set up the development environment, integrate Anthropic Agent SDK, and validate 
 6. Method handles API errors gracefully (retry on 5xx, fail-fast on 4xx)
 7. Unit tests mock Agent SDK responses
 8. Manual test with 10+ real Linear issues produces sensible briefing and logs token count
-
-### Story 1.4: Cost and Feasibility Analysis
-
-**As a** project owner,
-**I want** to measure actual token usage and cost for briefing generation,
-**so that** I can validate the project stays within $100/month budget before proceeding.
-
-**Acceptance Criteria:**
-1. `src/linear_chief/cost_tracker.py` module logs token usage per API call
-2. Test script generates 10 briefings with 50 issues each and reports total tokens used
-3. Cost calculation: tokens × Anthropic pricing (get current rate from docs)
-4. Extrapolate to monthly cost: (tokens per briefing) × 30 days
-5. If monthly cost > $100, document optimization strategies: prompt compression, caching, fewer issues
-6. Results documented in `docs/week1-spike-results.md` with decision: proceed, optimize, or pivot
-7. Linear API rate limits researched and documented (confirm polling strategy is viable)
+9. Cost tracking automatically logs token usage (included in BriefingAgent, not separate story)
 
 ---
 
@@ -368,7 +349,7 @@ Refine the briefing quality by improving issue analysis logic, optimize costs th
 
 **As a** project owner,
 **I want** to reduce Anthropic API costs by sending only changed issues,
-**so that** monthly costs stay well below $100 budget.
+**so that** monthly costs stay well below $20 budget target.
 
 **Acceptance Criteria:**
 1. `Database.get_issues_changed_since(timestamp)` method queries SQLite for issues updated since last briefing
