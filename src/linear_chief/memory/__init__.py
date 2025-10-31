@@ -1,3 +1,6 @@
-"""Memory and learning module using mem0 and ChromaDB."""
+"""Memory layer for persistent agent context and semantic search."""
 
-__all__ = []
+from .mem0_wrapper import MemoryManager
+from .vector_store import IssueVectorStore
+
+__all__ = ["MemoryManager", "IssueVectorStore"]
