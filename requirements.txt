@@ -1,0 +1,43 @@
+# Core dependencies with pinned compatible versions
+# Tested and working configuration to avoid dependency conflicts
+
+# Anthropic SDK
+anthropic==0.39.0
+
+# mem0 and dependencies (pinned for compatibility)
+mem0ai==0.1.19
+qdrant-client==1.9.1
+openai==1.54.0
+
+# ChromaDB (pinned for compatibility with mem0)
+chromadb==0.4.24
+chroma-hnswlib==0.7.3
+
+# Embeddings
+sentence-transformers==3.0.1
+
+# HTTP & API clients
+httpx==0.26.0
+
+# Telegram Bot
+python-telegram-bot==20.8
+
+# Database
+sqlalchemy==2.0.34
+
+# Configuration
+python-decouple==3.8
+
+# Scheduling
+apscheduler==3.10.4
+pytz==2024.1
+
+# Utilities
+tenacity==9.0.0
+python-json-logger==2.0.7
+rich==13.7.1
+
+# Common dependencies (explicit to avoid conflicts)
+numpy==1.26.4
+pydantic==2.9.2
+typing-extensions==4.12.2
