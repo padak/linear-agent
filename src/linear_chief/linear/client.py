@@ -95,14 +95,14 @@ class LinearClient:
         filter_parts = []
 
         if team_ids:
-            team_filter = " OR ".join([f'team: {{id: {{eq: "{tid}"}}}}' for tid in team_ids])
+            team_filter = " OR ".join([f'team: ' + '{id: {eq: "' + tid + '"}}' for tid in team_ids])
             filter_parts.append(f"or: [{team_filter}]")
 
         if assignee_id:
-            filter_parts.append(f'assignee: {{id: {{eq: "{assignee_id}"}}}}}')
+            filter_parts.append('assignee: {id: {eq: "' + assignee_id + '"}}')
 
         filter_str = ", ".join(filter_parts) if filter_parts else ""
-        filter_clause = f"filter: {{{filter_str}}}" if filter_str else ""
+        filter_clause = ("filter: {" + filter_str + "}") if filter_str else ""
 
         query = f"""
         query {{
