@@ -101,14 +101,13 @@ async def test_integration():
 
         print("   ✓ Telegram bot connected")
 
-        # Optionally send the briefing (commented out to avoid spam)
-        # success = await bot.send_briefing(briefing)
-        # if success:
-        #     print("   ✓ Briefing sent to Telegram")
-        # else:
-        #     print("   ❌ Failed to send briefing")
-
-        print("   ⚠️  Skipping actual send (uncomment to test sending)")
+        # Send the briefing to Telegram
+        print("   📤 Sending briefing to Telegram...")
+        success = await bot.send_briefing(briefing)
+        if success:
+            print("   ✓ Briefing sent to Telegram!")
+        else:
+            print("   ❌ Failed to send briefing")
 
     except Exception as e:
         print(f"   ❌ Telegram error: {e}")
