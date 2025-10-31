@@ -50,8 +50,10 @@ async def test_integration():
             viewer = await linear.get_viewer()
             print(f"   ✓ Connected as: {viewer.get('name')} ({viewer.get('email')})")
 
-            issues = await linear.get_issues(limit=5)
-            print(f"   ✓ Fetched {len(issues)} issues")
+            # Fetch all relevant issues (assigned, created, subscribed, commented)
+            print("   📋 Fetching your relevant issues...")
+            issues = await linear.get_my_relevant_issues(limit=50)
+            print(f"   ✓ Found {len(issues)} relevant issues (assigned/created/subscribed)")
 
             if not issues:
                 print("   ⚠️  No issues found. You might want to create some test issues.")

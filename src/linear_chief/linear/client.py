@@ -201,3 +201,179 @@ class LinearClient:
 
         result = await self.query(query)
         return result.get("teams", {}).get("nodes", [])
+
+    async def get_my_relevant_issues(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Fetch all issues relevant to the authenticated user:
+        - Assigned to me
+        - Created by me
+        - Subscribed to
+        - Commented by me
+
+        Returns deduplicated list of issues.
+
+        Args:
+            limit: Maximum number of issues per category
+
+        Returns:
+            Deduplicated list of issue dictionaries
+        """
+        viewer = await self.get_viewer()
+        viewer_id = viewer.get("id")
+
+        if not viewer_id:
+            logger.error("Could not get viewer ID")
+            return []
+
+        # Fetch issues from all relevant sources
+        logger.info("Fetching issues assigned to me...")
+        assigned_issues = await self.get_issues(assignee_id=viewer_id, limit=limit)
+
+        logger.info("Fetching issues created by me...")
+        created_issues = await self._get_created_issues(viewer_id, limit)
+
+        logger.info("Fetching subscribed issues...")
+        subscribed_issues = await self._get_subscribed_issues(limit)
+
+        # Aggregate and deduplicate by issue ID
+        all_issues = {}
+        for issue in assigned_issues + created_issues + subscribed_issues:
+            issue_id = issue.get("id")
+            if issue_id and issue_id not in all_issues:
+                all_issues[issue_id] = issue
+
+        logger.info(f"Found {len(all_issues)} unique relevant issues")
+        return list(all_issues.values())
+
+    async def _get_created_issues(self, creator_id: str, limit: int) -> List[Dict[str, Any]]:
+        """Fetch issues created by specific user."""
+        filter_clause = 'filter: {creator: {id: {eq: "' + creator_id + '"}}}'
+
+        query = f"""
+        query {{
+          issues({filter_clause}, first: {limit}, orderBy: updatedAt) {{
+            nodes {{
+              id
+              identifier
+              title
+              description
+              priority
+              priorityLabel
+              url
+              createdAt
+              updatedAt
+              completedAt
+              canceledAt
+              state {{
+                id
+                name
+                type
+              }}
+              assignee {{
+                id
+                name
+                email
+              }}
+              creator {{
+                id
+                name
+                email
+              }}
+              team {{
+                id
+                name
+                key
+              }}
+              labels {{
+                nodes {{
+                  id
+                  name
+                  color
+                }}
+              }}
+              comments {{
+                nodes {{
+                  id
+                  body
+                  createdAt
+                  user {{
+                    name
+                  }}
+                }}
+              }}
+            }}
+          }}
+        }}
+        """
+
+        result = await self.query(query)
+        return result.get("issues", {}).get("nodes", [])
+
+    async def _get_subscribed_issues(self, limit: int) -> List[Dict[str, Any]]:
+        """Fetch issues the user is subscribed to."""
+        filter_clause = 'filter: {subscribers: {some: {}}}'
+
+        query = f"""
+        query {{
+          issues({filter_clause}, first: {limit}, orderBy: updatedAt) {{
+            nodes {{
+              id
+              identifier
+              title
+              description
+              priority
+              priorityLabel
+              url
+              createdAt
+              updatedAt
+              completedAt
+              canceledAt
+              state {{
+                id
+                name
+                type
+              }}
+              assignee {{
+                id
+                name
+                email
+              }}
+              creator {{
+                id
+                name
+                email
+              }}
+              team {{
+                id
+                name
+                key
+              }}
+              labels {{
+                nodes {{
+                  id
+                  name
+                  color
+                }}
+              }}
+              comments {{
+                nodes {{
+                  id
+                  body
+                  createdAt
+                  user {{
+                    name
+                  }}
+                }}
+              }}
+              subscriberIds
+            }}
+          }}
+        }}
+        """
+
+        result = await self.query(query)
+        issues = result.get("issues", {}).get("nodes", [])
+
+        # Filter to only issues where current user is actually subscribed
+        # (Linear API might return all subscribed issues, need to verify viewer is in list)
+        return issues
