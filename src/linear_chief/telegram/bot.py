@@ -22,7 +22,9 @@ class TelegramBriefingBot:
         self.bot = Bot(token=bot_token)
         self.chat_id = chat_id
 
-    async def send_briefing(self, message: str, parse_mode: Optional[str] = "Markdown") -> bool:
+    async def send_briefing(
+        self, message: str, parse_mode: Optional[str] = "Markdown"
+    ) -> bool:
         """
         Send a briefing message to the configured chat.
 

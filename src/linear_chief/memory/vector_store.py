@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from typing import Any
+import numpy as np
 
 import chromadb
 from sentence_transformers import SentenceTransformer
@@ -49,7 +50,14 @@ class IssueVectorStore:
         """
         try:
             embedding = self._model.encode(text, normalize_embeddings=True)
-            return embedding.tolist()
+            # Handle different return types from sentence-transformers
+            if isinstance(embedding, np.ndarray):
+                return embedding.tolist()  # type: ignore[no-any-return]
+            elif hasattr(embedding, "tolist"):
+                return embedding.tolist()  # type: ignore[no-any-return]
+            else:
+                # Already a list - sentence-transformers can return various types
+                return list(embedding)  # type: ignore[arg-type]
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}", exc_info=True)
             raise
@@ -79,18 +87,23 @@ class IssueVectorStore:
 
         # Generate embedding in thread pool (CPU-bound operation)
         loop = asyncio.get_event_loop()
-        embedding = await loop.run_in_executor(None, self._generate_embedding, combined_text)
+        embedding = await loop.run_in_executor(
+            None, self._generate_embedding, combined_text
+        )
 
         try:
+            # ChromaDB type hints are imprecise for embeddings parameter
             self._collection.upsert(
                 ids=[issue_id],
-                embeddings=[embedding],
+                embeddings=[embedding],  # type: ignore[arg-type]
                 metadatas=[metadata],
                 documents=[combined_text],
             )
             logger.debug(f"Upserted issue {issue_id} to vector store")
         except Exception as e:
-            logger.error(f"Failed to add issue {issue_id} to vector store: {e}", exc_info=True)
+            logger.error(
+                f"Failed to add issue {issue_id} to vector store: {e}", exc_info=True
+            )
             raise
 
     async def search_similar(
@@ -108,28 +121,48 @@ class IssueVectorStore:
         """
         # Generate query embedding in thread pool
         loop = asyncio.get_event_loop()
-        query_embedding = await loop.run_in_executor(None, self._generate_embedding, query)
+        query_embedding = await loop.run_in_executor(
+            None, self._generate_embedding, query
+        )
 
         try:
+            # ChromaDB type hints are imprecise for query_embeddings parameter
             results = self._collection.query(
-                query_embeddings=[query_embedding],
+                query_embeddings=[query_embedding],  # type: ignore[arg-type]
                 n_results=limit,
                 where=filter_metadata,
             )
 
             # Format results
             similar_issues = []
-            for i in range(len(results["ids"][0])):
+            ids = results["ids"][0] if results["ids"] is not None else []
+            documents = (
+                results["documents"][0] if results["documents"] is not None else []
+            )
+            metadatas = (
+                results["metadatas"][0] if results["metadatas"] is not None else []
+            )
+            distances = (
+                results["distances"][0]
+                if "distances" in results and results["distances"] is not None
+                else None
+            )
+
+            for i in range(len(ids)):
                 similar_issues.append(
                     {
-                        "issue_id": results["ids"][0][i],
-                        "document": results["documents"][0][i],
-                        "metadata": results["metadatas"][0][i],
-                        "distance": results["distances"][0][i] if "distances" in results else None,
+                        "issue_id": ids[i],
+                        "document": documents[i] if i < len(documents) else "",
+                        "metadata": metadatas[i] if i < len(metadatas) else {},
+                        "distance": (
+                            distances[i] if distances and i < len(distances) else None
+                        ),
                     }
                 )
 
-            logger.info(f"Found {len(similar_issues)} similar issues for query: {query[:50]}...")
+            logger.info(
+                f"Found {len(similar_issues)} similar issues for query: {query[:50]}..."
+            )
             return similar_issues
 
         except Exception as e:
@@ -148,9 +181,15 @@ class IssueVectorStore:
         try:
             result = self._collection.get(ids=[issue_id], include=["embeddings"])
 
-            if result["ids"] and len(result["embeddings"]) > 0:
+            if (
+                result["ids"]
+                and result["embeddings"] is not None
+                and len(result["embeddings"]) > 0
+            ):
                 logger.debug(f"Retrieved embedding for issue {issue_id}")
-                return result["embeddings"][0]
+                # Convert to list[float] - ChromaDB returns Sequence types
+                embedding = result["embeddings"][0]
+                return list(embedding) if embedding else None
             else:
                 logger.warning(f"No embedding found for issue {issue_id}")
                 return None

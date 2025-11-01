@@ -42,7 +42,7 @@ class MemoryManager:
                         "config": {
                             "collection_name": "mem0",
                             "path": str(MEM0_PATH),
-                        }
+                        },
                     },
                     history_db_path=str(MEM0_PATH / "history.db"),  # Use .env path
                 )
@@ -59,7 +59,9 @@ class MemoryManager:
         else:
             logger.info("MEM0_API_KEY not set, using in-memory storage")
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    @retry(
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10)
+    )
     async def add_briefing_context(
         self, briefing: str, metadata: dict[str, Any] | None = None
     ) -> None:
@@ -109,20 +111,28 @@ class MemoryManager:
             try:
                 memories = self._client.get_all(user_id="linear_chief_agent")
                 # mem0 0.1.19+ returns list directly, not dict with "results"
-                memory_list = memories if isinstance(memories, list) else memories.get("results", [])
+                memory_list = (
+                    memories
+                    if isinstance(memories, list)
+                    else memories.get("results", [])
+                )
 
                 # Filter by date and type
                 filtered = [
                     mem
                     for mem in memory_list
-                    if datetime.fromisoformat(mem.get("metadata", {}).get("timestamp", "1970-01-01"))
+                    if datetime.fromisoformat(
+                        mem.get("metadata", {}).get("timestamp", "1970-01-01")
+                    )
                     > cutoff_date
                     and mem.get("metadata", {}).get("type") == "briefing"
                 ]
                 logger.info(f"Retrieved {len(filtered)} context items from mem0")
                 return filtered
             except Exception as e:
-                logger.error(f"Failed to retrieve context from mem0: {e}", exc_info=True)
+                logger.error(
+                    f"Failed to retrieve context from mem0: {e}", exc_info=True
+                )
                 return []
         else:
             # In-memory fallback
@@ -132,10 +142,14 @@ class MemoryManager:
                 if datetime.fromisoformat(item["metadata"]["timestamp"]) > cutoff_date
                 and item["type"] == "briefing"
             ]
-            logger.debug(f"Retrieved {len(filtered)} context items from in-memory store")
+            logger.debug(
+                f"Retrieved {len(filtered)} context items from in-memory store"
+            )
             return filtered
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    @retry(
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10)
+    )
     async def add_user_preference(
         self, preference: str, metadata: dict[str, Any] | None = None
     ) -> None:
@@ -180,7 +194,11 @@ class MemoryManager:
             try:
                 memories = self._client.get_all(user_id="linear_chief_user")
                 # mem0 0.1.19+ returns list directly, not dict with "results"
-                memory_list = memories if isinstance(memories, list) else memories.get("results", [])
+                memory_list = (
+                    memories
+                    if isinstance(memories, list)
+                    else memories.get("results", [])
+                )
 
                 preferences = [
                     mem
@@ -190,10 +208,16 @@ class MemoryManager:
                 logger.info(f"Retrieved {len(preferences)} preferences from mem0")
                 return preferences
             except Exception as e:
-                logger.error(f"Failed to retrieve preferences from mem0: {e}", exc_info=True)
+                logger.error(
+                    f"Failed to retrieve preferences from mem0: {e}", exc_info=True
+                )
                 return []
         else:
             # In-memory fallback
-            preferences = [item for item in self._memory_store if item["type"] == "preference"]
-            logger.debug(f"Retrieved {len(preferences)} preferences from in-memory store")
+            preferences = [
+                item for item in self._memory_store if item["type"] == "preference"
+            ]
+            logger.debug(
+                f"Retrieved {len(preferences)} preferences from in-memory store"
+            )
             return preferences

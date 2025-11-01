@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 from pathlib import Path
-from typing import Generator, Union
+from typing import Generator, Union, Optional, Any
 import logging
 
 from linear_chief.config import DATABASE_PATH
@@ -82,7 +82,9 @@ def get_session_maker(engine=None) -> sessionmaker:
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def get_db_session(session_maker: sessionmaker = None) -> Generator[Session, None, None]:
+def get_db_session(
+    session_maker: Optional[sessionmaker[Any]] = None,
+) -> Generator[Session, None, None]:
     """
     Get database session with automatic cleanup.
 

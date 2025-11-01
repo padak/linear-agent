@@ -2,9 +2,7 @@
 
 import pytest
 import time
-from datetime import datetime
-from unittest.mock import Mock, patch
-import pytz
+from unittest.mock import Mock
 
 from linear_chief.scheduling import BriefingScheduler
 
@@ -145,7 +143,10 @@ class TestBriefingScheduler:
             next_run = scheduler_eastern.get_next_run_time()
 
             assert next_run is not None
-            assert "Eastern" in next_run.tzinfo.zone or next_run.tzinfo.zone == "US/Eastern"
+            assert (
+                "Eastern" in next_run.tzinfo.zone
+                or next_run.tzinfo.zone == "US/Eastern"
+            )
 
         finally:
             scheduler_eastern.stop()

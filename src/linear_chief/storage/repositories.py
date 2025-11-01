@@ -94,9 +94,7 @@ class IssueHistoryRepository:
             .first()
         )
 
-    def get_snapshots_since(
-        self, issue_id: str, since: datetime
-    ) -> List[IssueHistory]:
+    def get_snapshots_since(self, issue_id: str, since: datetime) -> List[IssueHistory]:
         """
         Get all snapshots for an issue since a specific time.
 
@@ -219,11 +217,14 @@ class BriefingRepository:
             briefing_id: Briefing ID
             telegram_message_id: Telegram message ID
         """
-        briefing = self.session.query(Briefing).filter(Briefing.id == briefing_id).first()
+        briefing = (
+            self.session.query(Briefing).filter(Briefing.id == briefing_id).first()
+        )
         if briefing:
-            briefing.delivery_status = "sent"
-            briefing.sent_at = datetime.utcnow()
-            briefing.telegram_message_id = telegram_message_id
+            # SQLAlchemy ORM: Column assignments at runtime work despite type hints
+            briefing.delivery_status = "sent"  # type: ignore[assignment]
+            briefing.sent_at = datetime.utcnow()  # type: ignore[assignment]
+            briefing.telegram_message_id = telegram_message_id  # type: ignore[assignment]
             self.session.commit()
             logger.info(f"Marked briefing {briefing_id} as sent")
 
@@ -235,10 +236,13 @@ class BriefingRepository:
             briefing_id: Briefing ID
             error_message: Error description
         """
-        briefing = self.session.query(Briefing).filter(Briefing.id == briefing_id).first()
+        briefing = (
+            self.session.query(Briefing).filter(Briefing.id == briefing_id).first()
+        )
         if briefing:
-            briefing.delivery_status = "failed"
-            briefing.error_message = error_message
+            # SQLAlchemy ORM: Column assignments at runtime work despite type hints
+            briefing.delivery_status = "failed"  # type: ignore[assignment]
+            briefing.error_message = error_message  # type: ignore[assignment]
             self.session.commit()
             logger.error(f"Marked briefing {briefing_id} as failed: {error_message}")
 

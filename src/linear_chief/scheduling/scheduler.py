@@ -2,15 +2,15 @@
 
 from typing import Callable, Optional
 from datetime import datetime
-import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 import pytz
 
 from linear_chief.config import LOCAL_TIMEZONE, BRIEFING_TIME
+from linear_chief.utils.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BriefingScheduler:
@@ -37,7 +37,14 @@ class BriefingScheduler:
         self.scheduler: Optional[BackgroundScheduler] = None
         self._is_running = False
 
-        logger.info(f"Scheduler initialized: {briefing_time} {timezone}")
+        logger.info(
+            "Scheduler initialized",
+            extra={
+                "component": "scheduler",
+                "briefing_time": briefing_time,
+                "timezone": timezone,
+            },
+        )
 
     def start(self, briefing_job: Callable) -> None:
         """
@@ -57,8 +64,12 @@ class BriefingScheduler:
         try:
             hour, minute = map(int, self.briefing_time.split(":"))
         except ValueError as e:
-            logger.error(f"Invalid briefing time format: {self.briefing_time}", exc_info=True)
-            raise ValueError(f"BRIEFING_TIME must be in HH:MM format, got: {self.briefing_time}") from e
+            logger.error(
+                f"Invalid briefing time format: {self.briefing_time}", exc_info=True
+            )
+            raise ValueError(
+                f"BRIEFING_TIME must be in HH:MM format, got: {self.briefing_time}"
+            ) from e
 
         # Create scheduler
         self.scheduler = BackgroundScheduler(timezone=self.timezone)
@@ -125,7 +136,8 @@ class BriefingScheduler:
 
         job = self.scheduler.get_job("daily_briefing")
         if job and job.next_run_time:
-            return job.next_run_time
+            # APScheduler's next_run_time is a datetime from the scheduler library
+            return job.next_run_time  # type: ignore[no-any-return]
 
         return None
 

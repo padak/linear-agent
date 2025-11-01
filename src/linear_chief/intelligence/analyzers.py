@@ -1,7 +1,7 @@
 """Issue analysis logic for stagnation detection, blocking detection, and priority calculation."""
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from .types import AnalysisResult
@@ -83,8 +83,15 @@ class IssueAnalyzer:
                 return False
 
             # Check labels for "On Hold" or "Waiting"
-            labels = [label.get("name", "").lower() for label in issue.get("labels", {}).get("nodes", [])]
-            if any(keyword in label for label in labels for keyword in ["on hold", "waiting", "paused"]):
+            labels = [
+                label.get("name", "").lower()
+                for label in issue.get("labels", {}).get("nodes", [])
+            ]
+            if any(
+                keyword in label
+                for label in labels
+                for keyword in ["on hold", "waiting", "paused"]
+            ):
                 return False
 
             # Check updated timestamp
@@ -113,7 +120,10 @@ class IssueAnalyzer:
             return True
 
         except Exception as e:
-            logger.error(f"Error detecting stagnation for issue {issue.get('id')}: {e}", exc_info=True)
+            logger.error(
+                f"Error detecting stagnation for issue {issue.get('id')}: {e}",
+                exc_info=True,
+            )
             return False
 
     def detect_blocking(self, issue: dict[str, Any]) -> bool:
@@ -132,7 +142,10 @@ class IssueAnalyzer:
         """
         try:
             # Check labels for "Blocked"
-            labels = [label.get("name", "").lower() for label in issue.get("labels", {}).get("nodes", [])]
+            labels = [
+                label.get("name", "").lower()
+                for label in issue.get("labels", {}).get("nodes", [])
+            ]
             if any("blocked" in label for label in labels):
                 return True
 
@@ -155,7 +168,10 @@ class IssueAnalyzer:
             return False
 
         except Exception as e:
-            logger.error(f"Error detecting blocking for issue {issue.get('id')}: {e}", exc_info=True)
+            logger.error(
+                f"Error detecting blocking for issue {issue.get('id')}: {e}",
+                exc_info=True,
+            )
             return False
 
     def calculate_priority(self, issue: dict[str, Any]) -> int:
@@ -178,7 +194,10 @@ class IssueAnalyzer:
             priority = 5  # Base priority
 
             # Check priority labels
-            labels = [label.get("name", "") for label in issue.get("labels", {}).get("nodes", [])]
+            labels = [
+                label.get("name", "")
+                for label in issue.get("labels", {}).get("nodes", [])
+            ]
             for label in labels:
                 if "P0" in label or "Critical" in label:
                     priority = max(priority, 10)
@@ -192,7 +211,9 @@ class IssueAnalyzer:
             # Age factor (issues older than 7 days get +1 point)
             created_at_str = issue.get("createdAt")
             if created_at_str:
-                created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                created_at = datetime.fromisoformat(
+                    created_at_str.replace("Z", "+00:00")
+                )
                 age_days = (datetime.now(created_at.tzinfo) - created_at).days
                 if age_days > 7:
                     priority = min(priority + 1, 10)
@@ -214,7 +235,10 @@ class IssueAnalyzer:
             return max(1, min(priority, 10))  # Clamp to 1-10
 
         except Exception as e:
-            logger.error(f"Error calculating priority for issue {issue.get('id')}: {e}", exc_info=True)
+            logger.error(
+                f"Error calculating priority for issue {issue.get('id')}: {e}",
+                exc_info=True,
+            )
             return 5  # Default priority on error
 
     def _generate_insights(
@@ -244,7 +268,9 @@ class IssueAnalyzer:
 
             now = datetime.now(timezone.utc)
             days_since_update = (now - updated_at).days
-            insights.append(f"No activity for {days_since_update} days - needs attention")
+            insights.append(
+                f"No activity for {days_since_update} days - needs attention"
+            )
 
         if is_blocked:
             insights.append("Issue is blocked - investigate dependencies")
@@ -254,7 +280,9 @@ class IssueAnalyzer:
 
         status = issue.get("state", {}).get("name", "")
         if status.lower() in ["todo", "backlog"] and priority >= 7:
-            insights.append("High priority but not started - consider moving to In Progress")
+            insights.append(
+                "High priority but not started - consider moving to In Progress"
+            )
 
         if not insights:
             insights.append("No immediate concerns detected")

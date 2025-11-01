@@ -1,10 +1,12 @@
 """Agent SDK wrapper for generating Linear issue briefings."""
 
-import logging
 from typing import List, Dict, Any, Optional
 from anthropic import Anthropic
+from anthropic.types import TextBlock
 
-logger = logging.getLogger(__name__)
+from linear_chief.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class BriefingAgent:
@@ -52,7 +54,9 @@ class BriefingAgent:
         description = issue.get("description", "")
         if description:
             # Truncate long descriptions
-            description = description[:300] + "..." if len(description) > 300 else description
+            description = (
+                description[:300] + "..." if len(description) > 300 else description
+            )
             parts.append(f"Description: {description}")
 
         # Add recent comments
@@ -87,7 +91,9 @@ Guidelines:
 - Use clear, professional language
 - Prioritize by impact, not just priority labels"""
 
-    def _build_user_prompt(self, issues: List[Dict[str, Any]], user_context: Optional[str] = None) -> str:
+    def _build_user_prompt(
+        self, issues: List[Dict[str, Any]], user_context: Optional[str] = None
+    ) -> str:
         """
         Build the user prompt with issues.
 
@@ -98,7 +104,9 @@ Guidelines:
         Returns:
             User prompt string
         """
-        formatted_issues = "\n\n---\n\n".join([self._format_issue(issue) for issue in issues])
+        formatted_issues = "\n\n---\n\n".join(
+            [self._format_issue(issue) for issue in issues]
+        )
 
         prompt = f"""Analyze these {len(issues)} Linear issues and create a morning briefing.
 
@@ -137,7 +145,15 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
         if not issues:
             return "No issues to report today. All clear!"
 
-        logger.info(f"Generating briefing for {len(issues)} issues")
+        logger.info(
+            "Generating briefing",
+            extra={
+                "service": "Anthropic",
+                "model": self.model,
+                "issue_count": len(issues),
+                "max_tokens": max_tokens,
+            },
+        )
 
         try:
             response = self.client.messages.create(
@@ -152,13 +168,45 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
                 ],
             )
 
-            briefing = response.content[0].text
-            logger.info(f"Briefing generated successfully. Token usage: {response.usage.input_tokens} in, {response.usage.output_tokens} out")
+            # Type guard: ensure we have a TextBlock with text content
+            content_block = response.content[0]
+            if isinstance(content_block, TextBlock):
+                briefing = content_block.text
+            else:
+                logger.error(
+                    "Unexpected content type from Anthropic API",
+                    extra={
+                        "service": "Anthropic",
+                        "expected_type": "TextBlock",
+                        "actual_type": type(content_block).__name__,
+                    },
+                )
+                raise ValueError(f"Expected TextBlock, got {type(content_block)}")
+
+            logger.info(
+                "Briefing generated successfully",
+                extra={
+                    "service": "Anthropic",
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                    "total_tokens": response.usage.input_tokens
+                    + response.usage.output_tokens,
+                    "model": self.model,
+                },
+            )
 
             return briefing
 
         except Exception as e:
-            logger.error(f"Failed to generate briefing: {e}")
+            logger.error(
+                "Failed to generate briefing",
+                extra={
+                    "service": "Anthropic",
+                    "error_type": type(e).__name__,
+                    "model": self.model,
+                },
+                exc_info=True,
+            )
             raise
 
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:

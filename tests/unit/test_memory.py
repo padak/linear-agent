@@ -1,8 +1,7 @@
 """Unit tests for memory layer (MemoryManager and IssueVectorStore)."""
 
-import asyncio
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -61,7 +60,9 @@ class TestMemoryManager:
 
         # Verify in-memory storage
         preferences = [
-            item for item in memory_manager_no_api_key._memory_store if item["type"] == "preference"
+            item
+            for item in memory_manager_no_api_key._memory_store
+            if item["type"] == "preference"
         ]
         assert len(preferences) == 1
         assert preferences[0]["content"] == preference
@@ -85,15 +86,21 @@ class TestIssueVectorStore:
     @pytest.fixture
     def mock_chroma_client(self):
         """Mock ChromaDB client."""
-        with patch("linear_chief.memory.vector_store.chromadb.PersistentClient") as mock_client:
+        with patch(
+            "linear_chief.memory.vector_store.chromadb.PersistentClient"
+        ) as mock_client:
             mock_collection = MagicMock()
-            mock_client.return_value.get_or_create_collection.return_value = mock_collection
+            mock_client.return_value.get_or_create_collection.return_value = (
+                mock_collection
+            )
             yield mock_client, mock_collection
 
     @pytest.fixture
     def mock_sentence_transformer(self):
         """Mock SentenceTransformer model."""
-        with patch("linear_chief.memory.vector_store.SentenceTransformer") as mock_model:
+        with patch(
+            "linear_chief.memory.vector_store.SentenceTransformer"
+        ) as mock_model:
             mock_instance = MagicMock()
             mock_instance.encode.return_value.tolist.return_value = [0.1, 0.2, 0.3]
             mock_model.return_value = mock_instance
@@ -113,9 +120,9 @@ class TestIssueVectorStore:
             metadata={"status": "In Progress"},
         )
 
-        # Verify add was called
-        mock_collection.add.assert_called_once()
-        call_args = mock_collection.add.call_args[1]
+        # Verify upsert was called (changed from add to prevent duplicate warnings)
+        mock_collection.upsert.assert_called_once()
+        call_args = mock_collection.upsert.call_args[1]
         assert call_args["ids"] == ["PROJ-123"]
         assert call_args["metadatas"] == [{"status": "In Progress"}]
 
@@ -141,7 +148,9 @@ class TestIssueVectorStore:
         assert results[1]["issue_id"] == "PROJ-789"
 
     @pytest.mark.asyncio
-    async def test_get_issue_embedding(self, mock_chroma_client, mock_sentence_transformer):
+    async def test_get_issue_embedding(
+        self, mock_chroma_client, mock_sentence_transformer
+    ):
         """Test retrieving issue embedding."""
         _, mock_collection = mock_chroma_client
 
@@ -157,7 +166,9 @@ class TestIssueVectorStore:
         assert embedding == [0.5, 0.6, 0.7]
 
     @pytest.mark.asyncio
-    async def test_get_issue_embedding_not_found(self, mock_chroma_client, mock_sentence_transformer):
+    async def test_get_issue_embedding_not_found(
+        self, mock_chroma_client, mock_sentence_transformer
+    ):
         """Test retrieving embedding for non-existent issue."""
         _, mock_collection = mock_chroma_client
 

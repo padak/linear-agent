@@ -1,8 +1,7 @@
 """Integration tests for full briefing workflow."""
 
 import pytest
-import asyncio
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 from datetime import datetime
 
 from linear_chief.orchestrator import BriefingOrchestrator
@@ -64,11 +63,15 @@ def mock_linear_issues():
 class TestBriefingWorkflow:
     """Integration tests for briefing workflow."""
 
-    async def test_full_workflow_success(self, test_engine, mock_linear_issues, monkeypatch):
+    async def test_full_workflow_success(
+        self, test_engine, mock_linear_issues, monkeypatch
+    ):
         """Test successful end-to-end briefing workflow."""
         # Mock external API calls
         mock_linear_client = AsyncMock()
-        mock_linear_client.get_my_relevant_issues = AsyncMock(return_value=mock_linear_issues)
+        mock_linear_client.get_my_relevant_issues = AsyncMock(
+            return_value=mock_linear_issues
+        )
 
         mock_agent = AsyncMock()
         mock_agent.generate_briefing = AsyncMock(return_value="Test briefing content")
@@ -153,10 +156,14 @@ class TestBriefingWorkflow:
         assert result["issue_count"] == 0
         assert result["briefing_id"] is None
 
-    async def test_workflow_telegram_failure(self, test_engine, mock_linear_issues, monkeypatch):
+    async def test_workflow_telegram_failure(
+        self, test_engine, mock_linear_issues, monkeypatch
+    ):
         """Test workflow when Telegram send fails."""
         mock_linear_client = AsyncMock()
-        mock_linear_client.get_my_relevant_issues = AsyncMock(return_value=mock_linear_issues)
+        mock_linear_client.get_my_relevant_issues = AsyncMock(
+            return_value=mock_linear_issues
+        )
 
         mock_agent = AsyncMock()
         mock_agent.generate_briefing = AsyncMock(return_value="Test briefing")
@@ -229,7 +236,9 @@ class TestBriefingWorkflow:
     async def test_test_connections(self, monkeypatch):
         """Test connection testing functionality."""
         mock_linear_client = AsyncMock()
-        mock_linear_client.get_viewer = AsyncMock(return_value={"id": "user-1", "name": "Test User"})
+        mock_linear_client.get_viewer = AsyncMock(
+            return_value={"id": "user-1", "name": "Test User"}
+        )
 
         mock_telegram = AsyncMock()
         mock_telegram.test_connection = AsyncMock(return_value=True)
@@ -249,7 +258,9 @@ class TestBriefingWorkflow:
     async def test_test_connections_failure(self, monkeypatch):
         """Test connection testing with failures."""
         mock_linear_client = AsyncMock()
-        mock_linear_client.get_viewer = AsyncMock(side_effect=Exception("Connection failed"))
+        mock_linear_client.get_viewer = AsyncMock(
+            side_effect=Exception("Connection failed")
+        )
 
         mock_telegram = AsyncMock()
         mock_telegram.test_connection = AsyncMock(return_value=False)

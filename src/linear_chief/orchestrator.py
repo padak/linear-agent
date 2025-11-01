@@ -1,9 +1,10 @@
 """Main orchestrator for briefing generation workflow."""
 
-import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from datetime import datetime
+import uuid
 
+from linear_chief.utils.logging import get_logger, LogContext
 from linear_chief.linear import LinearClient
 from linear_chief.agent import BriefingAgent
 from linear_chief.telegram.bot import TelegramBriefingBot
@@ -23,7 +24,7 @@ from linear_chief.config import (
     TELEGRAM_CHAT_ID,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BriefingOrchestrator:
@@ -65,7 +66,7 @@ class BriefingOrchestrator:
         # Database session maker
         self.session_maker = get_session_maker()
 
-        logger.info("Orchestrator initialized")
+        logger.info("Orchestrator initialized", extra={"component": "orchestrator"})
 
     async def generate_and_send_briefing(self) -> Dict[str, Any]:
         """
@@ -97,191 +98,245 @@ class BriefingOrchestrator:
             "error": None,
         }
 
-        try:
-            # Step 1: Fetch issues from Linear
-            logger.info("Step 1/8: Fetching issues from Linear")
-            issues = await self.linear_client.get_my_relevant_issues()
-            result["issue_count"] = len(issues)
-            logger.info(f"Fetched {len(issues)} issues")
+        # Generate unique request ID for tracking
+        request_id = f"briefing-{uuid.uuid4().hex[:8]}"
 
-            if not issues:
-                logger.info("No issues to report")
-                result["success"] = True
-                result["duration_seconds"] = (datetime.utcnow() - start_time).total_seconds()
-                return result
+        with LogContext(request_id=request_id):
+            try:
+                # Step 1: Fetch issues from Linear
+                logger.info(
+                    "Step 1/8: Fetching issues from Linear",
+                    extra={"step": 1, "total_steps": 8, "operation": "fetch_issues"},
+                )
+                issues = await self.linear_client.get_my_relevant_issues()
+                result["issue_count"] = len(issues)
+                logger.info(
+                    "Fetched issues from Linear",
+                    extra={"issue_count": len(issues), "step": 1},
+                )
 
-            # Step 2: Analyze issues
-            logger.info("Step 2/8: Analyzing issues with intelligence layer")
-            analyzed_issues = []
-            for issue in issues:
-                analysis = self.analyzer.analyze_issue(issue)
-                # Attach analysis to issue for context
-                issue["_analysis"] = {
-                    "priority": analysis.priority,
-                    "is_stagnant": analysis.is_stagnant,
-                    "is_blocked": analysis.is_blocked,
-                    "insights": analysis.insights,
-                }
-                analyzed_issues.append(issue)
+                if not issues:
+                    logger.info("No issues to report")
+                    result["success"] = True
+                    result["duration_seconds"] = (
+                        datetime.utcnow() - start_time
+                    ).total_seconds()
+                    return result
 
-            # Sort by priority (descending)
-            analyzed_issues.sort(
-                key=lambda x: x.get("_analysis", {}).get("priority", 0),
-                reverse=True,
-            )
+                # Step 2: Analyze issues
+                logger.info("Step 2/8: Analyzing issues with intelligence layer")
+                analyzed_issues = []
+                for issue in issues:
+                    analysis = self.analyzer.analyze_issue(issue)
+                    # Attach analysis to issue for context
+                    issue["_analysis"] = {
+                        "priority": analysis.priority,
+                        "is_stagnant": analysis.is_stagnant,
+                        "is_blocked": analysis.is_blocked,
+                        "insights": analysis.insights,
+                    }
+                    analyzed_issues.append(issue)
 
-            # Step 3: Save issue snapshots to database
-            logger.info("Step 3/8: Saving issue snapshots to database")
-            for session in get_db_session(self.session_maker):
-                issue_repo = IssueHistoryRepository(session)
+                # Sort by priority (descending)
+                analyzed_issues.sort(
+                    key=lambda x: x.get("_analysis", {}).get("priority", 0),
+                    reverse=True,
+                )
+
+                # Step 3: Save issue snapshots to database
+                logger.info("Step 3/8: Saving issue snapshots to database")
+                for session in get_db_session(self.session_maker):
+                    issue_repo = IssueHistoryRepository(session)
+                    for issue in analyzed_issues:
+                        issue_repo.save_snapshot(
+                            issue_id=issue.get("identifier", ""),
+                            linear_id=issue.get("id", ""),
+                            title=issue.get("title", ""),
+                            state=issue.get("state", {}).get("name", ""),
+                            priority=issue.get("priority"),
+                            assignee_id=(
+                                issue.get("assignee", {}).get("id")
+                                if issue.get("assignee")
+                                else None
+                            ),
+                            assignee_name=(
+                                issue.get("assignee", {}).get("name")
+                                if issue.get("assignee")
+                                else None
+                            ),
+                            team_id=(
+                                issue.get("team", {}).get("id")
+                                if issue.get("team")
+                                else None
+                            ),
+                            team_name=(
+                                issue.get("team", {}).get("name")
+                                if issue.get("team")
+                                else None
+                            ),
+                            labels=[
+                                label.get("name", "")
+                                for label in issue.get("labels", {}).get("nodes", [])
+                            ],
+                            extra_metadata={"analysis": issue.get("_analysis")},
+                        )
+
+                # Step 4: Add issues to vector store
+                logger.info("Step 4/8: Adding issues to vector store")
                 for issue in analyzed_issues:
-                    issue_repo.save_snapshot(
+                    await self.vector_store.add_issue(
                         issue_id=issue.get("identifier", ""),
-                        linear_id=issue.get("id", ""),
                         title=issue.get("title", ""),
-                        state=issue.get("state", {}).get("name", ""),
-                        priority=issue.get("priority"),
-                        assignee_id=issue.get("assignee", {}).get("id") if issue.get("assignee") else None,
-                        assignee_name=issue.get("assignee", {}).get("name") if issue.get("assignee") else None,
-                        team_id=issue.get("team", {}).get("id") if issue.get("team") else None,
-                        team_name=issue.get("team", {}).get("name") if issue.get("team") else None,
-                        labels=[label.get("name", "") for label in issue.get("labels", {}).get("nodes", [])],
-                        extra_metadata={"analysis": issue.get("_analysis")},
+                        description=issue.get("description", ""),
+                        metadata={
+                            "state": issue.get("state", {}).get("name", ""),
+                            "priority": issue.get("_analysis", {}).get("priority", 0),
+                        },
                     )
 
-            # Step 4: Add issues to vector store
-            logger.info("Step 4/8: Adding issues to vector store")
-            for issue in analyzed_issues:
-                await self.vector_store.add_issue(
-                    issue_id=issue.get("identifier", ""),
-                    title=issue.get("title", ""),
-                    description=issue.get("description", ""),
-                    metadata={
-                        "state": issue.get("state", {}).get("name", ""),
-                        "priority": issue.get("_analysis", {}).get("priority", 0),
-                    },
+                # Step 5: Get agent context from memory
+                logger.info("Step 5/8: Retrieving agent context from memory")
+                memory_context = await self.memory_manager.get_agent_context(days=7)
+
+                # Convert list of context items to string for agent prompt
+                agent_context_str = None
+                if memory_context:
+                    context_parts = []
+                    for item in memory_context:
+                        if "memory" in item:
+                            context_parts.append(item["memory"])
+                    agent_context_str = (
+                        "\n\n".join(context_parts) if context_parts else None
+                    )
+
+                # Step 6: Generate briefing via Agent SDK
+                logger.info("Step 6/8: Generating briefing via Agent SDK")
+                briefing_content = await self.agent.generate_briefing(
+                    issues=analyzed_issues,
+                    user_context=agent_context_str,
                 )
 
-            # Step 5: Get agent context from memory
-            logger.info("Step 5/8: Retrieving agent context from memory")
-            agent_context = await self.memory_manager.get_agent_context(days=7)
+                # Extract token usage from last API call (approximate)
+                # Note: Would need to modify BriefingAgent to return usage stats
+                input_tokens = 3000  # Placeholder - should get from agent
+                output_tokens = 1000  # Placeholder - should get from agent
+                cost_usd = self.agent.estimate_cost(input_tokens, output_tokens)
+                result["cost_usd"] = cost_usd
 
-            # Step 6: Generate briefing via Agent SDK
-            logger.info("Step 6/8: Generating briefing via Agent SDK")
-            briefing_content = await self.agent.generate_briefing(
-                issues=analyzed_issues,
-                user_context=agent_context,
-            )
-
-            # Extract token usage from last API call (approximate)
-            # Note: Would need to modify BriefingAgent to return usage stats
-            input_tokens = 3000  # Placeholder - should get from agent
-            output_tokens = 1000  # Placeholder - should get from agent
-            cost_usd = self.agent.estimate_cost(input_tokens, output_tokens)
-            result["cost_usd"] = cost_usd
-
-            # Step 7: Send briefing via Telegram
-            logger.info("Step 7/8: Sending briefing via Telegram")
-            telegram_success = await self.telegram_bot.send_briefing(briefing_content)
-
-            # Step 8: Archive briefing and metrics to database
-            logger.info("Step 8/8: Archiving briefing and metrics to database")
-            for session in get_db_session(self.session_maker):
-                briefing_repo = BriefingRepository(session)
-                metrics_repo = MetricsRepository(session)
-
-                # Create briefing record
-                briefing = briefing_repo.create_briefing(
-                    content=briefing_content,
-                    issue_count=len(issues),
-                    agent_context={"context": agent_context} if agent_context else None,
-                    cost_usd=cost_usd,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    model_name=self.agent.model,
-                    extra_metadata={
-                        "analyzed_issues_count": len(analyzed_issues),
-                        "high_priority_count": sum(
-                            1 for i in analyzed_issues
-                            if i.get("_analysis", {}).get("priority", 0) >= 8
-                        ),
-                    },
+                # Step 7: Send briefing via Telegram
+                logger.info("Step 7/8: Sending briefing via Telegram")
+                telegram_success = await self.telegram_bot.send_briefing(
+                    briefing_content
                 )
 
-                result["briefing_id"] = briefing.id
-
-                # Mark delivery status
-                if telegram_success:
-                    briefing_repo.mark_as_sent(briefing.id)
-                else:
-                    briefing_repo.mark_as_failed(briefing.id, "Telegram delivery failed")
-
-                # Record metrics
-                metrics_repo.record_metric(
-                    metric_type="briefing_generated",
-                    metric_name="daily_briefing",
-                    value=1,
-                    unit="count",
-                    extra_metadata={
-                        "issue_count": len(issues),
-                        "cost_usd": cost_usd,
-                        "telegram_success": telegram_success,
-                    },
-                )
-
-                metrics_repo.record_metric(
-                    metric_type="api_cost",
-                    metric_name="anthropic_briefing",
-                    value=cost_usd,
-                    unit="usd",
-                    extra_metadata={
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "model": self.agent.model,
-                    },
-                )
-
-            # Add briefing to memory for future context
-            await self.memory_manager.add_briefing_context(
-                briefing_content,
-                metadata={
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "issue_count": len(issues),
-                },
-            )
-
-            # Success!
-            result["success"] = True
-            result["duration_seconds"] = (datetime.utcnow() - start_time).total_seconds()
-
-            logger.info(
-                f"Briefing workflow completed successfully. "
-                f"ID: {result['briefing_id']}, Issues: {len(issues)}, "
-                f"Cost: ${cost_usd:.4f}, Duration: {result['duration_seconds']:.2f}s"
-            )
-
-            return result
-
-        except Exception as e:
-            error_msg = f"Briefing workflow failed: {e}"
-            logger.error(error_msg, exc_info=True)
-            result["error"] = str(e)
-
-            # Try to record failure in database
-            try:
+                # Step 8: Archive briefing and metrics to database
+                logger.info("Step 8/8: Archiving briefing and metrics to database")
                 for session in get_db_session(self.session_maker):
+                    briefing_repo = BriefingRepository(session)
                     metrics_repo = MetricsRepository(session)
+
+                    # Create briefing record
+                    briefing = briefing_repo.create_briefing(
+                        content=briefing_content,
+                        issue_count=len(issues),
+                        agent_context=(
+                            {"context": agent_context_str}
+                            if agent_context_str
+                            else None
+                        ),
+                        cost_usd=cost_usd,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        model_name=self.agent.model,
+                        extra_metadata={
+                            "analyzed_issues_count": len(analyzed_issues),
+                            "high_priority_count": sum(
+                                1
+                                for i in analyzed_issues
+                                if i.get("_analysis", {}).get("priority", 0) >= 8
+                            ),
+                        },
+                    )
+
+                    result["briefing_id"] = int(briefing.id)
+
+                    # Mark delivery status
+                    if telegram_success:
+                        # Cast Column[int] to int for type checker
+                        briefing_repo.mark_as_sent(int(briefing.id))
+                    else:
+                        briefing_repo.mark_as_failed(
+                            int(briefing.id), "Telegram delivery failed"
+                        )
+
+                    # Record metrics
                     metrics_repo.record_metric(
-                        metric_type="briefing_error",
-                        metric_name="workflow_failure",
+                        metric_type="briefing_generated",
+                        metric_name="daily_briefing",
                         value=1,
                         unit="count",
-                        extra_metadata={"error": str(e)},
+                        extra_metadata={
+                            "issue_count": len(issues),
+                            "cost_usd": cost_usd,
+                            "telegram_success": telegram_success,
+                        },
                     )
-            except Exception as db_error:
-                logger.error(f"Failed to record error metric: {db_error}")
 
-            raise
+                    metrics_repo.record_metric(
+                        metric_type="api_cost",
+                        metric_name="anthropic_briefing",
+                        value=cost_usd,
+                        unit="usd",
+                        extra_metadata={
+                            "input_tokens": input_tokens,
+                            "output_tokens": output_tokens,
+                            "model": self.agent.model,
+                        },
+                    )
+
+                # Add briefing to memory for future context
+                await self.memory_manager.add_briefing_context(
+                    briefing_content,
+                    metadata={
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "issue_count": len(issues),
+                    },
+                )
+
+                # Success!
+                result["success"] = True
+                result["duration_seconds"] = (
+                    datetime.utcnow() - start_time
+                ).total_seconds()
+
+                logger.info(
+                    f"Briefing workflow completed successfully. "
+                    f"ID: {result['briefing_id']}, Issues: {len(issues)}, "
+                    f"Cost: ${cost_usd:.4f}, Duration: {result['duration_seconds']:.2f}s"
+                )
+
+                return result
+
+            except Exception as e:
+                error_msg = f"Briefing workflow failed: {e}"
+                logger.error(error_msg, exc_info=True)
+                result["error"] = str(e)
+
+                # Try to record failure in database
+                try:
+                    for session in get_db_session(self.session_maker):
+                        metrics_repo = MetricsRepository(session)
+                        metrics_repo.record_metric(
+                            metric_type="briefing_error",
+                            metric_name="workflow_failure",
+                            value=1,
+                            unit="count",
+                            extra_metadata={"error": str(e)},
+                        )
+                except Exception as db_error:
+                    logger.error(f"Failed to record error metric: {db_error}")
+
+                raise
 
     async def test_connections(self) -> Dict[str, bool]:
         """
@@ -304,7 +359,9 @@ class BriefingOrchestrator:
         # Test Telegram connection
         try:
             results["telegram"] = await self.telegram_bot.test_connection()
-            logger.info(f"Telegram connection: {'OK' if results['telegram'] else 'FAILED'}")
+            logger.info(
+                f"Telegram connection: {'OK' if results['telegram'] else 'FAILED'}"
+            )
         except Exception as e:
             logger.error(f"Telegram connection failed: {e}")
             results["telegram"] = False

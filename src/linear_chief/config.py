@@ -25,8 +25,12 @@ LOCAL_TIMEZONE = config("LOCAL_TIMEZONE", default="Europe/Prague")
 BRIEFING_TIME = config("BRIEFING_TIME", default="09:00")
 
 # Storage Configuration
-DATABASE_PATH = Path(config("DATABASE_PATH", default="~/.linear_chief/state.db")).expanduser()
-CHROMADB_PATH = Path(config("CHROMADB_PATH", default="~/.linear_chief/chromadb")).expanduser()
+DATABASE_PATH = Path(
+    config("DATABASE_PATH", default="~/.linear_chief/state.db")
+).expanduser()
+CHROMADB_PATH = Path(
+    config("CHROMADB_PATH", default="~/.linear_chief/chromadb")
+).expanduser()
 MEM0_PATH = Path(config("MEM0_PATH", default="~/.linear_chief/mem0")).expanduser()
 LOGS_PATH = Path(config("LOGS_PATH", default="~/.linear_chief/logs")).expanduser()
 
@@ -35,6 +39,11 @@ EMBEDDING_MODEL = config("EMBEDDING_MODEL", default="all-MiniLM-L6-v2")
 
 # Cost Tracking
 MONTHLY_BUDGET_USD = config("MONTHLY_BUDGET_USD", default=20.0, cast=float)
+
+# Logging Configuration
+LOG_LEVEL = config("LOG_LEVEL", default="INFO")
+LOG_FORMAT = config("LOG_FORMAT", default="console")  # "json" or "console"
+LOG_FILE = config("LOG_FILE", default=None)  # Optional file path
 
 
 def ensure_directories() -> None:

@@ -36,14 +36,18 @@ class TestIssueAnalyzer:
     def test_detect_stagnation_old_issue(self, analyzer, sample_issue_in_progress):
         """Test stagnation detection for old issue."""
         # Make issue old
-        sample_issue_in_progress["updatedAt"] = (datetime.now() - timedelta(days=5)).isoformat()
+        sample_issue_in_progress["updatedAt"] = (
+            datetime.now() - timedelta(days=5)
+        ).isoformat()
 
         is_stagnant = analyzer.detect_stagnation(sample_issue_in_progress)
         assert is_stagnant is True
 
     def test_detect_stagnation_on_hold_label(self, analyzer, sample_issue_in_progress):
         """Test that 'On Hold' label prevents stagnation detection."""
-        sample_issue_in_progress["updatedAt"] = (datetime.now() - timedelta(days=5)).isoformat()
+        sample_issue_in_progress["updatedAt"] = (
+            datetime.now() - timedelta(days=5)
+        ).isoformat()
         sample_issue_in_progress["labels"]["nodes"] = [{"name": "On Hold"}]
 
         is_stagnant = analyzer.detect_stagnation(sample_issue_in_progress)
@@ -51,16 +55,22 @@ class TestIssueAnalyzer:
 
     def test_detect_stagnation_paused_keyword(self, analyzer, sample_issue_in_progress):
         """Test that 'paused' keyword prevents stagnation detection."""
-        sample_issue_in_progress["updatedAt"] = (datetime.now() - timedelta(days=5)).isoformat()
+        sample_issue_in_progress["updatedAt"] = (
+            datetime.now() - timedelta(days=5)
+        ).isoformat()
         sample_issue_in_progress["description"] = "This is paused waiting for approval"
 
         is_stagnant = analyzer.detect_stagnation(sample_issue_in_progress)
         assert is_stagnant is False
 
-    def test_detect_stagnation_not_in_progress(self, analyzer, sample_issue_in_progress):
+    def test_detect_stagnation_not_in_progress(
+        self, analyzer, sample_issue_in_progress
+    ):
         """Test that non-InProgress issues aren't marked stagnant."""
         sample_issue_in_progress["state"]["name"] = "Todo"
-        sample_issue_in_progress["updatedAt"] = (datetime.now() - timedelta(days=5)).isoformat()
+        sample_issue_in_progress["updatedAt"] = (
+            datetime.now() - timedelta(days=5)
+        ).isoformat()
 
         is_stagnant = analyzer.detect_stagnation(sample_issue_in_progress)
         assert is_stagnant is False
@@ -89,7 +99,9 @@ class TestIssueAnalyzer:
         priority = analyzer.calculate_priority(sample_issue_in_progress)
         assert 1 <= priority <= 10
 
-    def test_calculate_priority_critical_label(self, analyzer, sample_issue_in_progress):
+    def test_calculate_priority_critical_label(
+        self, analyzer, sample_issue_in_progress
+    ):
         """Test priority calculation with P0/Critical label."""
         sample_issue_in_progress["labels"]["nodes"] = [{"name": "P0"}]
 
@@ -98,7 +110,9 @@ class TestIssueAnalyzer:
 
     def test_calculate_priority_old_issue(self, analyzer, sample_issue_in_progress):
         """Test priority boost for old issues."""
-        sample_issue_in_progress["createdAt"] = (datetime.now() - timedelta(days=10)).isoformat()
+        sample_issue_in_progress["createdAt"] = (
+            datetime.now() - timedelta(days=10)
+        ).isoformat()
 
         priority = analyzer.calculate_priority(sample_issue_in_progress)
         assert priority >= 6  # Base 5 + age bonus
@@ -123,7 +137,9 @@ class TestIssueAnalyzer:
 
     def test_generate_insights_stagnant(self, analyzer, sample_issue_in_progress):
         """Test insight generation for stagnant issue."""
-        sample_issue_in_progress["updatedAt"] = (datetime.now() - timedelta(days=5)).isoformat()
+        sample_issue_in_progress["updatedAt"] = (
+            datetime.now() - timedelta(days=5)
+        ).isoformat()
 
         result = analyzer.analyze_issue(sample_issue_in_progress)
 
@@ -166,7 +182,9 @@ class TestAnalysisResult:
     def test_analysis_result_invalid_priority_high(self):
         """Test AnalysisResult rejects priority > 10."""
         with pytest.raises(ValueError, match="Priority must be 1-10"):
-            AnalysisResult(priority=11, is_stagnant=False, is_blocked=False, insights=[])
+            AnalysisResult(
+                priority=11, is_stagnant=False, is_blocked=False, insights=[]
+            )
 
     def test_analysis_result_invalid_priority_low(self):
         """Test AnalysisResult rejects priority < 1."""

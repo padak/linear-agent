@@ -1,15 +1,19 @@
 """CLI entry point for Linear Chief of Staff."""
 
 import asyncio
-import logging
 import sys
-from datetime import datetime, timedelta
-from typing import Optional
 
 import click
 from tabulate import tabulate
 
-from linear_chief.config import ensure_directories, DATABASE_PATH
+from linear_chief.config import (
+    ensure_directories,
+    DATABASE_PATH,
+    LOG_LEVEL,
+    LOG_FORMAT,
+    LOG_FILE,
+)
+from linear_chief.utils.logging import setup_logging, get_logger
 from linear_chief.orchestrator import BriefingOrchestrator
 from linear_chief.scheduling import BriefingScheduler
 from linear_chief.storage import (
@@ -20,12 +24,13 @@ from linear_chief.storage import (
     MetricsRepository,
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+# Initialize logging system
+setup_logging(
+    level=LOG_LEVEL,
+    format_type=LOG_FORMAT,
+    log_file=LOG_FILE,
 )
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @click.group()
@@ -65,7 +70,9 @@ def briefing():
             if result.get("briefing_id"):
                 click.echo(f"  Briefing ID: {result['briefing_id']}")
         else:
-            click.echo(f"\n✗ Briefing failed: {result.get('error', 'Unknown error')}", err=True)
+            click.echo(
+                f"\n✗ Briefing failed: {result.get('error', 'Unknown error')}", err=True
+            )
             sys.exit(1)
 
     except Exception as e:
@@ -118,7 +125,7 @@ def start():
         scheduler.start(briefing_job)
         next_run = scheduler.get_next_run_time()
 
-        click.echo(f"✓ Scheduler started successfully!")
+        click.echo("✓ Scheduler started successfully!")
         click.echo(f"  Next briefing: {next_run}")
         click.echo("\nPress Ctrl+C to stop...")
 
@@ -154,7 +161,7 @@ def metrics(days: int):
             recent_briefings = briefing_repo.get_recent_briefings(days=days)
             total_cost = briefing_repo.get_total_cost(days=days)
 
-            click.echo(f"📊 Briefing Statistics:")
+            click.echo("📊 Briefing Statistics:")
             click.echo(f"  Total briefings: {len(recent_briefings)}")
             click.echo(f"  Total cost: ${total_cost:.4f}")
 
@@ -162,8 +169,12 @@ def metrics(days: int):
                 avg_cost = total_cost / len(recent_briefings)
                 click.echo(f"  Average cost per briefing: ${avg_cost:.4f}")
 
-                sent_count = sum(1 for b in recent_briefings if b.delivery_status == "sent")
-                failed_count = sum(1 for b in recent_briefings if b.delivery_status == "failed")
+                sent_count = sum(
+                    1 for b in recent_briefings if b.delivery_status == "sent"
+                )
+                failed_count = sum(
+                    1 for b in recent_briefings if b.delivery_status == "failed"
+                )
 
                 click.echo(f"  Sent successfully: {sent_count}")
                 click.echo(f"  Failed: {failed_count}")
@@ -176,7 +187,7 @@ def metrics(days: int):
             )
 
             if cost_metrics["count"] > 0:
-                click.echo(f"\n💰 API Cost Metrics:")
+                click.echo("\n💰 API Cost Metrics:")
                 click.echo(f"  Total API calls: {int(cost_metrics['count'])}")
                 click.echo(f"  Total cost: ${cost_metrics['sum']:.4f}")
                 click.echo(f"  Average cost: ${cost_metrics['avg']:.4f}")
@@ -185,16 +196,18 @@ def metrics(days: int):
 
             # Recent briefings table
             if recent_briefings:
-                click.echo(f"\n📝 Recent Briefings:")
+                click.echo("\n📝 Recent Briefings:")
                 table_data = []
                 for b in recent_briefings[:10]:  # Show last 10
-                    table_data.append([
-                        b.id,
-                        b.generated_at.strftime("%Y-%m-%d %H:%M"),
-                        b.issue_count,
-                        f"${b.cost_usd:.4f}" if b.cost_usd else "N/A",
-                        b.delivery_status,
-                    ])
+                    table_data.append(
+                        [
+                            b.id,
+                            b.generated_at.strftime("%Y-%m-%d %H:%M"),
+                            b.issue_count,
+                            f"${b.cost_usd:.4f}" if b.cost_usd else "N/A",
+                            b.delivery_status,
+                        ]
+                    )
 
                 headers = ["ID", "Generated At", "Issues", "Cost", "Status"]
                 click.echo(tabulate(table_data, headers=headers, tablefmt="simple"))
@@ -225,11 +238,17 @@ def history(days: int, limit: int):
 
             for i, briefing in enumerate(recent_briefings[:limit], 1):
                 click.echo(f"\n{'='*60}")
-                click.echo(f"Briefing #{briefing.id} - {briefing.generated_at.strftime('%Y-%m-%d %H:%M')}")
+                click.echo(
+                    f"Briefing #{briefing.id} - {briefing.generated_at.strftime('%Y-%m-%d %H:%M')}"
+                )
                 click.echo(f"{'='*60}")
                 click.echo(f"Issues: {briefing.issue_count}")
                 click.echo(f"Status: {briefing.delivery_status}")
-                click.echo(f"Cost: ${briefing.cost_usd:.4f}" if briefing.cost_usd else "Cost: N/A")
+                click.echo(
+                    f"Cost: ${briefing.cost_usd:.4f}"
+                    if briefing.cost_usd
+                    else "Cost: N/A"
+                )
                 click.echo(f"\nContent:\n{briefing.content[:500]}...")
 
     except Exception as e:

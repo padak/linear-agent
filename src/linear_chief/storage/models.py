@@ -1,6 +1,5 @@
 """SQLAlchemy ORM models for persistent storage."""
 
-from datetime import datetime
 from sqlalchemy import Column, String, Integer, Float, DateTime, JSON, Text, Index
 from sqlalchemy.sql import func
 
@@ -22,19 +21,21 @@ class IssueHistory(Base):
     linear_id = Column(String(100), nullable=False)  # Linear UUID
     title = Column(Text, nullable=False)
     state = Column(String(50), nullable=False)  # e.g., "In Progress", "Done"
-    priority = Column(Integer, nullable=True)  # 0=None, 1=Urgent, 2=High, 3=Normal, 4=Low
+    priority = Column(
+        Integer, nullable=True
+    )  # 0=None, 1=Urgent, 2=High, 3=Normal, 4=Low
     assignee_id = Column(String(100), nullable=True)
     assignee_name = Column(String(200), nullable=True)
     team_id = Column(String(100), nullable=True)
     team_name = Column(String(200), nullable=True)
     labels = Column(JSON, nullable=True)  # List of label names
-    extra_metadata = Column(JSON, nullable=True)  # Additional fields (project, cycle, etc.)
+    extra_metadata = Column(
+        JSON, nullable=True
+    )  # Additional fields (project, cycle, etc.)
     snapshot_at = Column(DateTime, nullable=False, default=func.now(), index=True)
     created_at = Column(DateTime, nullable=False, default=func.now())
 
-    __table_args__ = (
-        Index("ix_issue_snapshot", "issue_id", "snapshot_at"),
-    )
+    __table_args__ = (Index("ix_issue_snapshot", "issue_id", "snapshot_at"),)
 
     def __repr__(self) -> str:
         return f"<IssueHistory(issue_id={self.issue_id}, state={self.state}, snapshot_at={self.snapshot_at})>"
@@ -58,10 +59,14 @@ class Briefing(Base):
     input_tokens = Column(Integer, nullable=True)
     output_tokens = Column(Integer, nullable=True)
     model_name = Column(String(100), nullable=True)  # e.g., "claude-sonnet-4-20250514"
-    delivery_status = Column(String(50), nullable=False, default="pending")  # pending, sent, failed
+    delivery_status = Column(
+        String(50), nullable=False, default="pending"
+    )  # pending, sent, failed
     telegram_message_id = Column(String(100), nullable=True)
     error_message = Column(Text, nullable=True)
-    extra_metadata = Column(JSON, nullable=True)  # Additional fields (timezone, user prefs, etc.)
+    extra_metadata = Column(
+        JSON, nullable=True
+    )  # Additional fields (timezone, user prefs, etc.)
     generated_at = Column(DateTime, nullable=False, default=func.now(), index=True)
     sent_at = Column(DateTime, nullable=True)
 
@@ -79,11 +84,19 @@ class Metrics(Base):
     __tablename__ = "metrics"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    metric_type = Column(String(50), nullable=False, index=True)  # e.g., "api_call", "briefing_generated"
-    metric_name = Column(String(100), nullable=False)  # e.g., "linear_fetch_issues", "anthropic_generate"
+    metric_type = Column(
+        String(50), nullable=False, index=True
+    )  # e.g., "api_call", "briefing_generated"
+    metric_name = Column(
+        String(100), nullable=False
+    )  # e.g., "linear_fetch_issues", "anthropic_generate"
     value = Column(Float, nullable=False)  # Numeric value (count, duration, cost, etc.)
-    unit = Column(String(50), nullable=False)  # e.g., "count", "seconds", "usd", "tokens"
-    extra_metadata = Column(JSON, nullable=True)  # Additional context (issue count, model, etc.)
+    unit = Column(
+        String(50), nullable=False
+    )  # e.g., "count", "seconds", "usd", "tokens"
+    extra_metadata = Column(
+        JSON, nullable=True
+    )  # Additional context (issue count, model, etc.)
     recorded_at = Column(DateTime, nullable=False, default=func.now(), index=True)
 
     __table_args__ = (

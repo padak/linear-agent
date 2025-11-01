@@ -3,9 +3,10 @@
 import httpx
 from typing import Dict, List, Any, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
-import logging
 
-logger = logging.getLogger(__name__)
+from linear_chief.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class LinearClient:
@@ -44,7 +45,9 @@ class LinearClient:
         wait=wait_exponential(multiplier=1, min=2, max=10),
         reraise=True,
     )
-    async def query(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def query(
+        self, query: str, variables: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         Execute a GraphQL query against Linear API.
 
@@ -58,7 +61,7 @@ class LinearClient:
         Raises:
             httpx.HTTPError: If the request fails
         """
-        payload = {"query": query}
+        payload: Dict[str, Any] = {"query": query}
         if variables:
             payload["variables"] = variables
 
@@ -74,12 +77,20 @@ class LinearClient:
 
         # Log GraphQL errors before raising HTTP error
         if "errors" in data:
-            logger.error(f"GraphQL errors: {data['errors']}")
+            logger.error(
+                "GraphQL query failed",
+                extra={
+                    "service": "Linear",
+                    "error_type": "GraphQLError",
+                    "errors": data["errors"],
+                },
+            )
             raise Exception(f"GraphQL query failed: {data['errors']}")
 
         response.raise_for_status()
 
-        return data.get("data", {})
+        # GraphQL responses are dynamically typed JSON - mypy can't verify structure
+        return data.get("data", {})  # type: ignore[no-any-return]
 
     async def get_issues(
         self,
@@ -101,7 +112,9 @@ class LinearClient:
         filter_parts = []
 
         if team_ids:
-            team_filter = " OR ".join([f'team: ' + '{id: {eq: "' + tid + '"}}' for tid in team_ids])
+            team_filter = " OR ".join(
+                ["team: " + '{id: {eq: "' + tid + '"}}' for tid in team_ids]
+            )
             filter_parts.append(f"or: [{team_filter}]")
 
         if assignee_id:
@@ -163,7 +176,8 @@ class LinearClient:
         """
 
         result = await self.query(query)
-        return result.get("issues", {}).get("nodes", [])
+        # GraphQL responses are dynamically typed
+        return result.get("issues", {}).get("nodes", [])  # type: ignore[no-any-return]
 
     async def get_viewer(self) -> Dict[str, Any]:
         """
@@ -183,7 +197,8 @@ class LinearClient:
         """
 
         result = await self.query(query)
-        return result.get("viewer", {})
+        # GraphQL responses are dynamically typed
+        return result.get("viewer", {})  # type: ignore[no-any-return]
 
     async def get_teams(self) -> List[Dict[str, Any]]:
         """
@@ -206,7 +221,8 @@ class LinearClient:
         """
 
         result = await self.query(query)
-        return result.get("teams", {}).get("nodes", [])
+        # GraphQL responses are dynamically typed
+        return result.get("teams", {}).get("nodes", [])  # type: ignore[no-any-return]
 
     async def get_my_relevant_issues(self, limit: int = 100) -> List[Dict[str, Any]]:
         """
@@ -240,7 +256,11 @@ class LinearClient:
         created_issues = await self._get_created_issues(viewer_id, limit)
 
         logger.info("Fetching subscribed issues...")
-        subscribed_issues = await self._get_subscribed_issues(viewer_email, limit) if viewer_email else []
+        subscribed_issues = (
+            await self._get_subscribed_issues(viewer_email, limit)
+            if viewer_email
+            else []
+        )
 
         # Aggregate and deduplicate by issue ID
         all_issues = {}
@@ -252,7 +272,9 @@ class LinearClient:
         logger.info(f"Found {len(all_issues)} unique relevant issues")
         return list(all_issues.values())
 
-    async def _get_created_issues(self, creator_id: str, limit: int) -> List[Dict[str, Any]]:
+    async def _get_created_issues(
+        self, creator_id: str, limit: int
+    ) -> List[Dict[str, Any]]:
         """Fetch issues created by specific user."""
         filter_clause = 'filter: {creator: {id: {eq: "' + creator_id + '"}}}'
 
@@ -314,9 +336,12 @@ class LinearClient:
         """
 
         result = await self.query(query)
-        return result.get("issues", {}).get("nodes", [])
+        # GraphQL responses are dynamically typed
+        return result.get("issues", {}).get("nodes", [])  # type: ignore[no-any-return]
 
-    async def _get_subscribed_issues(self, email: str, limit: int) -> List[Dict[str, Any]]:
+    async def _get_subscribed_issues(
+        self, email: str, limit: int
+    ) -> List[Dict[str, Any]]:
         """Fetch issues the user is subscribed to."""
         filter_clause = 'filter: {subscribers: {email: {eq: "' + email + '"}}}'
 
@@ -384,4 +409,5 @@ class LinearClient:
         """
 
         result = await self.query(query)
-        return result.get("issues", {}).get("nodes", [])
+        # GraphQL responses are dynamically typed
+        return result.get("issues", {}).get("nodes", [])  # type: ignore[no-any-return]

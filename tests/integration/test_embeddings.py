@@ -1,6 +1,5 @@
 """Integration tests for embeddings and semantic search with real ChromaDB."""
 
-import asyncio
 import shutil
 import tempfile
 from pathlib import Path
@@ -107,7 +106,11 @@ async def test_semantic_search_similarity(temp_chromadb_path, sample_issues):
 
     # Top result should be authentication-related
     top_result_ids = [r["issue_id"] for r in results]
-    assert "PROJ-101" in top_result_ids or "PROJ-102" in top_result_ids or "PROJ-105" in top_result_ids
+    assert (
+        "PROJ-101" in top_result_ids
+        or "PROJ-102" in top_result_ids
+        or "PROJ-105" in top_result_ids
+    )
 
     # Results should have expected fields
     for result in results:
@@ -173,7 +176,9 @@ async def test_delete_issue_from_vector_store(temp_chromadb_path, sample_issues)
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_semantic_search_finds_relevant_results(temp_chromadb_path, sample_issues):
+async def test_semantic_search_finds_relevant_results(
+    temp_chromadb_path, sample_issues
+):
     """Test that semantic search finds semantically relevant results."""
     store = IssueVectorStore()
 
@@ -187,7 +192,9 @@ async def test_semantic_search_finds_relevant_results(temp_chromadb_path, sample
         )
 
     # Search for performance-related issues
-    results = await store.search_similar("slow queries and performance optimization", limit=2)
+    results = await store.search_similar(
+        "slow queries and performance optimization", limit=2
+    )
 
     assert len(results) > 0
 
