@@ -82,13 +82,13 @@ class IssueVectorStore:
         embedding = await loop.run_in_executor(None, self._generate_embedding, combined_text)
 
         try:
-            self._collection.add(
+            self._collection.upsert(
                 ids=[issue_id],
                 embeddings=[embedding],
                 metadatas=[metadata],
                 documents=[combined_text],
             )
-            logger.debug(f"Added issue {issue_id} to vector store")
+            logger.debug(f"Upserted issue {issue_id} to vector store")
         except Exception as e:
             logger.error(f"Failed to add issue {issue_id} to vector store: {e}", exc_info=True)
             raise

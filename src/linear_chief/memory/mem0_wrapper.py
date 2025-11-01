@@ -29,7 +29,6 @@ class MemoryManager:
                 import os
                 from mem0 import Memory
                 from mem0.configs.base import MemoryConfig
-                from mem0.configs.vector_stores.qdrant import QdrantConfig
                 from ..config import OPENAI_API_KEY, MEM0_PATH
 
                 # Set OpenAI API key for embeddings
@@ -37,13 +36,14 @@ class MemoryManager:
                     os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
                 # Configure mem0 to use custom storage path from .env
-                vector_store_config = QdrantConfig(
-                    collection_name="mem0",
-                    path=str(MEM0_PATH),  # Use path from .env instead of /tmp/qdrant
-                )
-
                 memory_config = MemoryConfig(
-                    vector_store={"provider": "qdrant", "config": vector_store_config},
+                    vector_store={
+                        "provider": "qdrant",
+                        "config": {
+                            "collection_name": "mem0",
+                            "path": str(MEM0_PATH),
+                        }
+                    },
                     history_db_path=str(MEM0_PATH / "history.db"),  # Use .env path
                 )
 
