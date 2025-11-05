@@ -33,8 +33,13 @@ class BriefingAgent:
         Returns:
             Formatted issue string
         """
+        # Format issue header WITHOUT links (Claude would remove them anyway)
+        # Links will be added in post-processing after briefing generation
+        identifier = issue.get("identifier", "N/A")
+        title = issue.get("title", "Untitled")
+
         parts = [
-            f"**{issue.get('identifier', 'N/A')}**: {issue.get('title', 'Untitled')}",
+            f"**{identifier}**: {title}",
             f"Status: {issue.get('state', {}).get('name', 'Unknown')}",
             f"Priority: {issue.get('priorityLabel', 'None')}",
         ]
@@ -125,6 +130,62 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
 
         return prompt
 
+    def _add_clickable_links(
+        self, briefing: str, issues: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Post-process briefing to add clickable links for issue identifiers.
+
+        This is done AFTER Claude generates the briefing because Claude tends
+        to remove/modify Markdown links during generation.
+
+        Args:
+            briefing: Generated briefing text
+            issues: List of issues with URLs
+
+        Returns:
+            Briefing with clickable links
+        """
+        import re
+
+        # Build mapping of identifier -> URL
+        issue_map = {}
+        for issue in issues:
+            identifier = issue.get("identifier")
+            url = issue.get("url")
+            if identifier and url:
+                issue_map[identifier] = url
+
+        # Replace **IDENTIFIER** or **PREFIX IDENTIFIER:** with clickable links
+        # Preserves emoji and other prefixes
+        def replace_identifier(match):
+            prefix = match.group(1) or ""  # e.g., "🚨 " or ""
+            identifier = match.group(2)  # e.g., "DMD-480"
+            colon_inside = match.group(3) or ""  # Colon inside **
+            colon_outside = match.group(4) or ""  # Colon outside **
+
+            if identifier in issue_map:
+                url = issue_map[identifier]
+                # Create clickable link, preserving emoji prefix and colons
+                return f"[**{prefix}{identifier}{colon_inside}**]({url}){colon_outside}"
+            else:
+                return match.group(0)  # No URL available, keep original
+
+        # Match **[PREFIX] IDENTIFIER[:][**][:] with optional prefix (emoji, icons, etc.)
+        # Pattern handles:
+        # - **DMD-480**          -> plain
+        # - **🚨 DMD-480**       -> with emoji prefix
+        # - **DMD-480**:         -> colon outside
+        # - **DMD-480:**         -> colon inside
+        # Group 1: optional prefix (emoji + space, or other non-alphanumeric chars + space)
+        # Group 2: identifier (DMD-480)
+        # Group 3: optional colon inside **
+        # Group 4: optional colon outside **
+        pattern = r"\*\*((?:[^\*\w]*\s+)?)([A-Z][A-Z0-9]+-\d+)(:?)\*\*(:?)"
+        briefing_with_links = re.sub(pattern, replace_identifier, briefing)
+
+        return briefing_with_links
+
     async def generate_briefing(
         self,
         issues: List[Dict[str, Any]],
@@ -195,7 +256,10 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
                 },
             )
 
-            return briefing
+            # Post-process: Add clickable links for issue identifiers
+            briefing_with_links = self._add_clickable_links(briefing, issues)
+
+            return briefing_with_links
 
         except Exception as e:
             logger.error(

@@ -262,14 +262,23 @@ class LinearClient:
             else []
         )
 
+        logger.info("Fetching issues I commented on...")
+        commented_issues = await self._get_commented_issues(viewer_id, limit)
+
         # Aggregate and deduplicate by issue ID
         all_issues = {}
-        for issue in assigned_issues + created_issues + subscribed_issues:
+        for issue in (
+            assigned_issues + created_issues + subscribed_issues + commented_issues
+        ):
             issue_id = issue.get("id")
             if issue_id and issue_id not in all_issues:
                 all_issues[issue_id] = issue
 
-        logger.info(f"Found {len(all_issues)} unique relevant issues")
+        logger.info(
+            f"Found {len(all_issues)} unique relevant issues "
+            f"(assigned: {len(assigned_issues)}, created: {len(created_issues)}, "
+            f"subscribed: {len(subscribed_issues)}, commented: {len(commented_issues)})"
+        )
         return list(all_issues.values())
 
     async def _get_created_issues(
@@ -411,3 +420,100 @@ class LinearClient:
         result = await self.query(query)
         # GraphQL responses are dynamically typed
         return result.get("issues", {}).get("nodes", [])  # type: ignore[no-any-return]
+
+    async def _get_commented_issues(
+        self, user_id: str, limit: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch issues the user has commented on.
+
+        Strategy: Query comments by user, extract unique issue IDs,
+        then fetch full issue details.
+
+        Args:
+            user_id: User ID to filter comments by
+            limit: Maximum number of comments to fetch
+
+        Returns:
+            List of unique issues with user comments
+        """
+        # Step 1: Get all comments by this user
+        query = f"""
+        query {{
+          comments(first: {limit}, filter: {{user: {{id: {{eq: "{user_id}"}}}}}}) {{
+            nodes {{
+              id
+              issue {{
+                id
+                identifier
+                title
+                description
+                priority
+                priorityLabel
+                url
+                createdAt
+                updatedAt
+                completedAt
+                canceledAt
+                state {{
+                  id
+                  name
+                  type
+                }}
+                assignee {{
+                  id
+                  name
+                  email
+                }}
+                creator {{
+                  id
+                  name
+                  email
+                }}
+                team {{
+                  id
+                  name
+                  key
+                }}
+                labels {{
+                  nodes {{
+                    id
+                    name
+                    color
+                  }}
+                }}
+                comments {{
+                  nodes {{
+                    id
+                    body
+                    createdAt
+                    user {{
+                      name
+                    }}
+                  }}
+                }}
+                subscribers {{
+                  nodes {{
+                    id
+                    email
+                  }}
+                }}
+              }}
+            }}
+          }}
+        }}
+        """
+
+        result = await self.query(query)
+        comments = result.get("comments", {}).get("nodes", [])
+
+        # Step 2: Extract unique issues (deduplicate)
+        issues_map = {}
+        for comment in comments:
+            issue = comment.get("issue")
+            if issue:
+                issue_id = issue.get("id")
+                if issue_id and issue_id not in issues_map:
+                    issues_map[issue_id] = issue
+
+        return list(issues_map.values())

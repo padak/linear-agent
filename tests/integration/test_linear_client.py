@@ -235,6 +235,111 @@ def mock_subscribed_issues_response():
     }
 
 
+@pytest.fixture
+def mock_commented_issues_response():
+    """Mock commented issues response (comments query with nested issues)."""
+    return {
+        "data": {
+            "comments": {
+                "nodes": [
+                    {
+                        "id": "comment-uuid-1",
+                        "issue": {
+                            "id": "issue-uuid-5",
+                            "identifier": "PROJ-127",
+                            "title": "Commented issue",
+                            "description": "Issue I commented on",
+                            "priority": 1,
+                            "priorityLabel": "Medium",
+                            "url": "https://linear.app/issue/PROJ-127",
+                            "createdAt": "2024-01-06T10:00:00Z",
+                            "updatedAt": "2024-01-06T11:00:00Z",
+                            "completedAt": None,
+                            "canceledAt": None,
+                            "state": {
+                                "id": "state-uuid-5",
+                                "name": "In Progress",
+                                "type": "started",
+                            },
+                            "assignee": {
+                                "id": "other-user-uuid-3",
+                                "name": "Charlie Brown",
+                                "email": "charlie@example.com",
+                            },
+                            "creator": {
+                                "id": "other-user-uuid-3",
+                                "name": "Charlie Brown",
+                                "email": "charlie@example.com",
+                            },
+                            "team": {
+                                "id": "team-uuid-1",
+                                "name": "Engineering",
+                                "key": "ENG",
+                            },
+                            "labels": {"nodes": []},
+                            "comments": {
+                                "nodes": [
+                                    {
+                                        "id": "comment-uuid-1",
+                                        "body": "My comment on this issue",
+                                        "createdAt": "2024-01-06T11:00:00Z",
+                                        "user": {"name": "Test User"},
+                                    }
+                                ]
+                            },
+                            "subscribers": {"nodes": []},
+                        },
+                    },
+                    {
+                        "id": "comment-uuid-2",
+                        "issue": {
+                            "id": "issue-uuid-6",
+                            "identifier": "PROJ-128",
+                            "title": "Another commented issue",
+                            "description": "Another issue I commented on",
+                            "priority": 3,
+                            "priorityLabel": "Urgent",
+                            "url": "https://linear.app/issue/PROJ-128",
+                            "createdAt": "2024-01-07T10:00:00Z",
+                            "updatedAt": "2024-01-07T12:00:00Z",
+                            "completedAt": None,
+                            "canceledAt": None,
+                            "state": {
+                                "id": "state-uuid-6",
+                                "name": "Todo",
+                                "type": "unstarted",
+                            },
+                            "assignee": None,
+                            "creator": {
+                                "id": "other-user-uuid-4",
+                                "name": "Diana Prince",
+                                "email": "diana@example.com",
+                            },
+                            "team": {
+                                "id": "team-uuid-2",
+                                "name": "Product",
+                                "key": "PROD",
+                            },
+                            "labels": {"nodes": []},
+                            "comments": {
+                                "nodes": [
+                                    {
+                                        "id": "comment-uuid-2",
+                                        "body": "Another comment",
+                                        "createdAt": "2024-01-07T12:00:00Z",
+                                        "user": {"name": "Test User"},
+                                    }
+                                ]
+                            },
+                            "subscribers": {"nodes": []},
+                        },
+                    },
+                ]
+            }
+        }
+    }
+
+
 @pytest.mark.asyncio
 class TestLinearClientQuery:
     """Tests for GraphQL query execution."""
@@ -467,10 +572,11 @@ class TestLinearClientGetMyRelevantIssues:
         mock_issues_response,
         mock_created_issues_response,
         mock_subscribed_issues_response,
+        mock_commented_issues_response,
     ):
-        """Test fetching issues from all sources (assigned + created + subscribed)."""
+        """Test fetching issues from all sources (assigned + created + subscribed + commented)."""
         with patch("httpx.AsyncClient.post") as mock_post:
-            # Set up responses in order: viewer, assigned, created, subscribed
+            # Set up responses in order: viewer, assigned, created, subscribed, commented
             mock_post.side_effect = [
                 Mock(
                     json=Mock(return_value=mock_viewer_response),
@@ -488,13 +594,17 @@ class TestLinearClientGetMyRelevantIssues:
                     json=Mock(return_value=mock_subscribed_issues_response),
                     raise_for_status=Mock(),
                 ),
+                Mock(
+                    json=Mock(return_value=mock_commented_issues_response),
+                    raise_for_status=Mock(),
+                ),
             ]
 
             client = LinearClient(api_key)
             issues = await client.get_my_relevant_issues(limit=50)
 
-            # Should get 4 unique issues (2 assigned + 1 created + 1 subscribed)
-            assert len(issues) == 4
+            # Should get 6 unique issues (2 assigned + 1 created + 1 subscribed + 2 commented)
+            assert len(issues) == 6
 
             # Verify all issue IDs are present
             issue_ids = {issue["id"] for issue in issues}
@@ -502,6 +612,8 @@ class TestLinearClientGetMyRelevantIssues:
             assert "issue-uuid-2" in issue_ids  # Assigned
             assert "issue-uuid-3" in issue_ids  # Created
             assert "issue-uuid-4" in issue_ids  # Subscribed
+            assert "issue-uuid-5" in issue_ids  # Commented
+            assert "issue-uuid-6" in issue_ids  # Commented
 
             await client.close()
 
@@ -519,6 +631,7 @@ class TestLinearClientGetMyRelevantIssues:
         }
 
         with patch("httpx.AsyncClient.post") as mock_post:
+            # viewer, assigned, created, subscribed, commented
             mock_post.side_effect = [
                 Mock(
                     json=Mock(return_value=mock_viewer_response),
@@ -533,6 +646,10 @@ class TestLinearClientGetMyRelevantIssues:
                 ),
                 Mock(
                     json=Mock(return_value={"data": {"issues": {"nodes": []}}}),
+                    raise_for_status=Mock(),
+                ),
+                Mock(
+                    json=Mock(return_value={"data": {"comments": {"nodes": []}}}),
                     raise_for_status=Mock(),
                 ),
             ]
@@ -553,17 +670,20 @@ class TestLinearClientGetMyRelevantIssues:
         self, api_key, mock_viewer_response
     ):
         """Test when no issues are found in any source."""
-        empty_response = {"data": {"issues": {"nodes": []}}}
+        empty_issues_response = {"data": {"issues": {"nodes": []}}}
+        empty_comments_response = {"data": {"comments": {"nodes": []}}}
 
         with patch("httpx.AsyncClient.post") as mock_post:
+            # viewer, assigned, created, subscribed, commented
             mock_post.side_effect = [
                 Mock(
                     json=Mock(return_value=mock_viewer_response),
                     raise_for_status=Mock(),
                 ),
-                Mock(json=Mock(return_value=empty_response), raise_for_status=Mock()),
-                Mock(json=Mock(return_value=empty_response), raise_for_status=Mock()),
-                Mock(json=Mock(return_value=empty_response), raise_for_status=Mock()),
+                Mock(json=Mock(return_value=empty_issues_response), raise_for_status=Mock()),
+                Mock(json=Mock(return_value=empty_issues_response), raise_for_status=Mock()),
+                Mock(json=Mock(return_value=empty_issues_response), raise_for_status=Mock()),
+                Mock(json=Mock(return_value=empty_comments_response), raise_for_status=Mock()),
             ]
 
             client = LinearClient(api_key)
@@ -599,6 +719,7 @@ class TestLinearClientGetMyRelevantIssues:
         }
 
         with patch("httpx.AsyncClient.post") as mock_post:
+            # viewer, assigned, created, commented (subscribed skipped due to no email)
             mock_post.side_effect = [
                 Mock(json=Mock(return_value=viewer_no_email), raise_for_status=Mock()),
                 Mock(
@@ -609,7 +730,10 @@ class TestLinearClientGetMyRelevantIssues:
                     json=Mock(return_value={"data": {"issues": {"nodes": []}}}),
                     raise_for_status=Mock(),
                 ),
-                # No fourth call - subscribed should be skipped
+                Mock(
+                    json=Mock(return_value={"data": {"comments": {"nodes": []}}}),
+                    raise_for_status=Mock(),
+                ),
             ]
 
             client = LinearClient(api_key)
@@ -617,8 +741,8 @@ class TestLinearClientGetMyRelevantIssues:
 
             # Should only get assigned + created, not subscribed
             assert len(issues) == 2
-            # Only 3 API calls (viewer, assigned, created)
-            assert mock_post.call_count == 3
+            # 4 API calls (viewer, assigned, created, commented) - subscribed skipped
+            assert mock_post.call_count == 4
 
             await client.close()
 
@@ -642,6 +766,7 @@ class TestLinearClientGetMyRelevantIssues:
         }
 
         with patch("httpx.AsyncClient.post") as mock_post:
+            # viewer, assigned (partial), created (empty), subscribed (empty), commented (empty)
             mock_post.side_effect = [
                 Mock(
                     json=Mock(return_value=mock_viewer_response),
@@ -654,6 +779,10 @@ class TestLinearClientGetMyRelevantIssues:
                 ),
                 Mock(
                     json=Mock(return_value={"data": {"issues": {"nodes": []}}}),
+                    raise_for_status=Mock(),
+                ),
+                Mock(
+                    json=Mock(return_value={"data": {"comments": {"nodes": []}}}),
                     raise_for_status=Mock(),
                 ),
             ]
@@ -693,6 +822,217 @@ class TestLinearClientGetMyRelevantIssues:
 
             with pytest.raises(Exception, match="GraphQL query failed"):
                 await client.get_my_relevant_issues(limit=50)
+
+            await client.close()
+
+
+@pytest.mark.asyncio
+class TestLinearClientGetCommentedIssues:
+    """Tests for _get_commented_issues method (comment-based filtering)."""
+
+    async def test_get_commented_issues_success(
+        self, api_key, mock_commented_issues_response
+    ):
+        """Test fetching issues the user has commented on."""
+        with patch("httpx.AsyncClient.post") as mock_post:
+            mock_post.return_value = Mock(
+                json=Mock(return_value=mock_commented_issues_response),
+                raise_for_status=Mock(),
+            )
+
+            client = LinearClient(api_key)
+            issues = await client._get_commented_issues("viewer-uuid-123", limit=50)
+
+            # Should get 2 issues (from 2 comments)
+            assert len(issues) == 2
+
+            # Verify issue IDs
+            issue_ids = [issue["id"] for issue in issues]
+            assert "issue-uuid-5" in issue_ids
+            assert "issue-uuid-6" in issue_ids
+
+            # Verify issue details
+            issue_5 = next(i for i in issues if i["id"] == "issue-uuid-5")
+            assert issue_5["identifier"] == "PROJ-127"
+            assert issue_5["title"] == "Commented issue"
+
+            await client.close()
+
+    async def test_get_commented_issues_deduplication(self, api_key):
+        """Test deduplication when user has multiple comments on same issue."""
+        # Same issue appears in multiple comments
+        duplicate_comments = {
+            "data": {
+                "comments": {
+                    "nodes": [
+                        {
+                            "id": "comment-uuid-1",
+                            "issue": {
+                                "id": "issue-uuid-5",
+                                "identifier": "PROJ-127",
+                                "title": "Issue with multiple comments",
+                                "description": "Test issue",
+                                "priority": 1,
+                                "priorityLabel": "Medium",
+                                "url": "https://linear.app/issue/PROJ-127",
+                                "createdAt": "2024-01-06T10:00:00Z",
+                                "updatedAt": "2024-01-06T11:00:00Z",
+                                "completedAt": None,
+                                "canceledAt": None,
+                                "state": {
+                                    "id": "state-uuid-5",
+                                    "name": "In Progress",
+                                    "type": "started",
+                                },
+                                "assignee": None,
+                                "creator": {
+                                    "id": "other-uuid",
+                                    "name": "Other User",
+                                    "email": "other@example.com",
+                                },
+                                "team": {
+                                    "id": "team-uuid-1",
+                                    "name": "Engineering",
+                                    "key": "ENG",
+                                },
+                                "labels": {"nodes": []},
+                                "comments": {"nodes": []},
+                                "subscribers": {"nodes": []},
+                            },
+                        },
+                        {
+                            "id": "comment-uuid-2",
+                            "issue": {
+                                "id": "issue-uuid-5",  # Same issue!
+                                "identifier": "PROJ-127",
+                                "title": "Issue with multiple comments",
+                                "description": "Test issue",
+                                "priority": 1,
+                                "priorityLabel": "Medium",
+                                "url": "https://linear.app/issue/PROJ-127",
+                                "createdAt": "2024-01-06T10:00:00Z",
+                                "updatedAt": "2024-01-06T12:00:00Z",
+                                "completedAt": None,
+                                "canceledAt": None,
+                                "state": {
+                                    "id": "state-uuid-5",
+                                    "name": "In Progress",
+                                    "type": "started",
+                                },
+                                "assignee": None,
+                                "creator": {
+                                    "id": "other-uuid",
+                                    "name": "Other User",
+                                    "email": "other@example.com",
+                                },
+                                "team": {
+                                    "id": "team-uuid-1",
+                                    "name": "Engineering",
+                                    "key": "ENG",
+                                },
+                                "labels": {"nodes": []},
+                                "comments": {"nodes": []},
+                                "subscribers": {"nodes": []},
+                            },
+                        },
+                    ]
+                }
+            }
+        }
+
+        with patch("httpx.AsyncClient.post") as mock_post:
+            mock_post.return_value = Mock(
+                json=Mock(return_value=duplicate_comments),
+                raise_for_status=Mock(),
+            )
+
+            client = LinearClient(api_key)
+            issues = await client._get_commented_issues("viewer-uuid-123", limit=50)
+
+            # Should deduplicate - only 1 unique issue
+            assert len(issues) == 1
+            assert issues[0]["id"] == "issue-uuid-5"
+
+            await client.close()
+
+    async def test_get_commented_issues_no_comments(self, api_key):
+        """Test when user has no comments."""
+        empty_response = {"data": {"comments": {"nodes": []}}}
+
+        with patch("httpx.AsyncClient.post") as mock_post:
+            mock_post.return_value = Mock(
+                json=Mock(return_value=empty_response),
+                raise_for_status=Mock(),
+            )
+
+            client = LinearClient(api_key)
+            issues = await client._get_commented_issues("viewer-uuid-123", limit=50)
+
+            assert len(issues) == 0
+            await client.close()
+
+    async def test_get_commented_issues_comment_without_issue(self, api_key):
+        """Test handling comments that have no associated issue."""
+        comments_no_issue = {
+            "data": {
+                "comments": {
+                    "nodes": [
+                        {
+                            "id": "comment-uuid-1",
+                            "issue": None,  # No issue!
+                        },
+                        {
+                            "id": "comment-uuid-2",
+                            "issue": {
+                                "id": "issue-uuid-5",
+                                "identifier": "PROJ-127",
+                                "title": "Valid issue",
+                                "description": "Test",
+                                "priority": 1,
+                                "priorityLabel": "Medium",
+                                "url": "https://linear.app/issue/PROJ-127",
+                                "createdAt": "2024-01-06T10:00:00Z",
+                                "updatedAt": "2024-01-06T11:00:00Z",
+                                "completedAt": None,
+                                "canceledAt": None,
+                                "state": {
+                                    "id": "state-uuid-5",
+                                    "name": "In Progress",
+                                    "type": "started",
+                                },
+                                "assignee": None,
+                                "creator": {
+                                    "id": "other-uuid",
+                                    "name": "Other",
+                                    "email": "other@example.com",
+                                },
+                                "team": {
+                                    "id": "team-uuid-1",
+                                    "name": "Engineering",
+                                    "key": "ENG",
+                                },
+                                "labels": {"nodes": []},
+                                "comments": {"nodes": []},
+                                "subscribers": {"nodes": []},
+                            },
+                        },
+                    ]
+                }
+            }
+        }
+
+        with patch("httpx.AsyncClient.post") as mock_post:
+            mock_post.return_value = Mock(
+                json=Mock(return_value=comments_no_issue),
+                raise_for_status=Mock(),
+            )
+
+            client = LinearClient(api_key)
+            issues = await client._get_commented_issues("viewer-uuid-123", limit=50)
+
+            # Should only get the valid issue (comment without issue is skipped)
+            assert len(issues) == 1
+            assert issues[0]["id"] == "issue-uuid-5"
 
             await client.close()
 
