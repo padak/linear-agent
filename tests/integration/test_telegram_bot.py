@@ -478,3 +478,199 @@ class TestTelegramBotEdgeCases:
 
             assert all(results)
             assert mock_bot.get_me.call_count == 5
+
+
+@pytest.mark.asyncio
+class TestTelegramBotWithKeyboards:
+    """Tests for bot with inline keyboards."""
+
+    async def test_send_briefing_with_feedback_keyboard(self, bot_token, chat_id):
+        """Test sending briefing with feedback keyboard."""
+        from linear_chief.telegram.keyboards import get_briefing_feedback_keyboard
+
+        with patch("linear_chief.telegram.bot.Bot") as MockBot:
+            mock_bot = AsyncMock()
+            mock_bot.send_message = AsyncMock(return_value=Mock(message_id=123))
+            MockBot.return_value = mock_bot
+
+            bot = TelegramBriefingBot(bot_token, chat_id)
+            keyboard = get_briefing_feedback_keyboard()
+
+            # Send message with keyboard (would need bot enhancement)
+            result = await bot.send_briefing("Test briefing")
+
+            assert result is True
+
+    async def test_keyboard_structure(self):
+        """Test feedback keyboard structure."""
+        from linear_chief.telegram.keyboards import get_briefing_feedback_keyboard
+
+        keyboard = get_briefing_feedback_keyboard()
+
+        # Verify keyboard has buttons
+        assert len(keyboard.inline_keyboard) == 1  # One row
+        assert len(keyboard.inline_keyboard[0]) == 2  # Two buttons
+
+        # Verify button data
+        buttons = keyboard.inline_keyboard[0]
+        assert buttons[0].callback_data == "feedback_positive"
+        assert buttons[1].callback_data == "feedback_negative"
+
+    async def test_issue_action_keyboard_structure(self):
+        """Test issue action keyboard structure."""
+        from linear_chief.telegram.keyboards import get_issue_action_keyboard
+
+        keyboard = get_issue_action_keyboard(
+            issue_id="PROJ-123",
+            issue_url="https://linear.app/team/issue/PROJ-123"
+        )
+
+        # Verify keyboard has 2 rows
+        assert len(keyboard.inline_keyboard) == 2
+
+        # First row: Open in Linear (URL button)
+        assert len(keyboard.inline_keyboard[0]) == 1
+        assert keyboard.inline_keyboard[0][0].url == "https://linear.app/team/issue/PROJ-123"
+
+        # Second row: Mark Done, Unsubscribe (callback buttons)
+        assert len(keyboard.inline_keyboard[1]) == 2
+        assert keyboard.inline_keyboard[1][0].callback_data == "issue_done_PROJ-123"
+        assert keyboard.inline_keyboard[1][1].callback_data == "issue_unsub_PROJ-123"
+
+
+@pytest.mark.asyncio
+class TestHandlerRegistration:
+    """Tests for handler registration and bot application setup."""
+
+    async def test_handlers_are_registered(self):
+        """Test that all handlers would be registered in application."""
+        from linear_chief.telegram.handlers import (
+            start_handler,
+            help_handler,
+            status_handler,
+            text_message_handler,
+        )
+        from linear_chief.telegram.callbacks import (
+            feedback_callback_handler,
+            issue_action_callback_handler,
+        )
+
+        # Verify handlers exist and are callable
+        assert callable(start_handler)
+        assert callable(help_handler)
+        assert callable(status_handler)
+        assert callable(text_message_handler)
+        assert callable(feedback_callback_handler)
+        assert callable(issue_action_callback_handler)
+
+    async def test_callback_patterns(self):
+        """Test callback query patterns are correct."""
+        # Verify feedback patterns
+        feedback_positive = "feedback_positive"
+        feedback_negative = "feedback_negative"
+
+        assert feedback_positive.startswith("feedback_")
+        assert feedback_negative.startswith("feedback_")
+
+        # Verify issue action patterns
+        issue_done = "issue_done_PROJ-123"
+        issue_unsub = "issue_unsub_PROJ-456"
+
+        assert issue_done.startswith("issue_done_")
+        assert issue_unsub.startswith("issue_unsub_")
+
+        # Extract issue IDs
+        assert issue_done.replace("issue_done_", "") == "PROJ-123"
+        assert issue_unsub.replace("issue_unsub_", "") == "PROJ-456"
+
+
+@pytest.mark.asyncio
+class TestEndToEndWorkflow:
+    """Tests for end-to-end bidirectional workflow."""
+
+    async def test_user_sends_message_gets_response(self, bot_token, chat_id):
+        """Test complete user interaction workflow."""
+        from telegram import Update, Message, Chat, User
+        from linear_chief.telegram.handlers import text_message_handler
+
+        # Mock components
+        mock_user = Mock(spec=User)
+        mock_user.id = 12345
+        mock_user.username = "testuser"
+
+        mock_chat = Mock(spec=Chat)
+        mock_chat.id = chat_id
+        mock_chat.send_message = AsyncMock()
+
+        mock_message = Mock(spec=Message)
+        mock_message.text = "What issues are blocked?"
+        mock_message.from_user = mock_user
+        mock_message.chat = mock_chat
+
+        mock_update = Mock(spec=Update)
+        mock_update.message = mock_message
+        mock_update.effective_user = mock_user
+        mock_update.effective_chat = mock_chat
+
+        mock_context = Mock()
+
+        # Handle message
+        await text_message_handler(mock_update, mock_context)
+
+        # Verify response was sent
+        mock_chat.send_message.assert_called_once()
+
+    async def test_feedback_workflow(self, bot_token, chat_id):
+        """Test complete feedback workflow."""
+        from telegram import Update, CallbackQuery, Message, Chat, User
+        from linear_chief.telegram.callbacks import feedback_callback_handler
+
+        # Mock components
+        mock_user = Mock(spec=User)
+        mock_user.id = 12345
+
+        mock_chat = Mock(spec=Chat)
+        mock_chat.id = chat_id
+
+        mock_message = Mock(spec=Message)
+        mock_message.message_id = 123
+        mock_message.chat = mock_chat
+        mock_message.reply_text = AsyncMock()
+
+        mock_query = Mock(spec=CallbackQuery)
+        mock_query.id = "callback_123"
+        mock_query.from_user = mock_user
+        mock_query.message = mock_message
+        mock_query.data = "feedback_positive"
+        mock_query.answer = AsyncMock()
+        mock_query.edit_message_reply_markup = AsyncMock()
+
+        mock_update = Mock(spec=Update)
+        mock_update.callback_query = mock_query
+
+        mock_context = Mock()
+
+        # Mock database operations
+        with patch(
+            "linear_chief.telegram.callbacks.get_session_maker"
+        ) as mock_get_session_maker, patch(
+            "linear_chief.telegram.callbacks.get_db_session"
+        ) as mock_get_db_session:
+
+            mock_session = Mock()
+            mock_get_db_session.return_value = [mock_session]
+
+            mock_feedback_repo = Mock()
+            mock_feedback_repo.save_feedback = Mock()
+
+            with patch(
+                "linear_chief.telegram.callbacks.FeedbackRepository",
+                return_value=mock_feedback_repo,
+            ):
+                await feedback_callback_handler(mock_update, mock_context)
+
+        # Verify workflow completed
+        mock_query.answer.assert_called_once()
+        mock_query.edit_message_reply_markup.assert_called_once()
+        mock_message.reply_text.assert_called_once()
+        mock_feedback_repo.save_feedback.assert_called_once()

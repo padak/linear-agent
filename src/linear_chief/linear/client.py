@@ -517,3 +517,114 @@ class LinearClient:
                     issues_map[issue_id] = issue
 
         return list(issues_map.values())
+
+    async def get_issue_by_identifier(
+        self, identifier: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fetch a single issue by its identifier (e.g., 'DMD-480', 'CSM-93').
+
+        Uses GraphQL filter with team key and issue number for efficient querying.
+
+        Args:
+            identifier: Issue identifier (e.g., 'DMD-480')
+
+        Returns:
+            Issue dictionary with full details, or None if not found
+        """
+        # Extract team key and number from identifier (e.g., 'CSM-93' -> 'CSM', 93)
+        if "-" not in identifier:
+            logger.warning(f"Invalid identifier format: {identifier}")
+            return None
+
+        parts = identifier.split("-")
+        team_key = parts[0]
+
+        try:
+            issue_number = int(parts[1])
+        except (ValueError, IndexError):
+            logger.warning(f"Invalid identifier format: {identifier}")
+            return None
+
+        # Query single issue using team key + number filter (efficient!)
+        query = f"""
+        query {{
+          issues(filter: {{number: {{eq: {issue_number}}}, team: {{key: {{eq: "{team_key}"}}}}}}, first: 1) {{
+            nodes {{
+              id
+              identifier
+              title
+              description
+              priority
+              priorityLabel
+              url
+              createdAt
+              updatedAt
+              completedAt
+              canceledAt
+              state {{
+                id
+                name
+                type
+              }}
+              assignee {{
+                id
+                name
+                email
+              }}
+              creator {{
+                id
+                name
+                email
+              }}
+              team {{
+                id
+                name
+                key
+              }}
+              labels {{
+                nodes {{
+                  id
+                  name
+                  color
+                }}
+              }}
+              comments {{
+                nodes {{
+                  id
+                  body
+                  createdAt
+                  user {{
+                    name
+                  }}
+                }}
+              }}
+              subscribers {{
+                nodes {{
+                  id
+                  email
+                }}
+              }}
+            }}
+          }}
+        }}
+        """
+
+        try:
+            result = await self.query(query)
+            issues = result.get("issues", {}).get("nodes", [])
+
+            # GraphQL filter ensures we get exactly the right issue (or nothing)
+            if issues:
+                return issues[0]  # type: ignore[no-any-return]
+
+            logger.warning(f"Issue {identifier} not found")
+            return None
+
+        except Exception as e:
+            logger.error(
+                f"Failed to fetch issue {identifier}",
+                extra={"error_type": type(e).__name__},
+                exc_info=True,
+            )
+            return None

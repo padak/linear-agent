@@ -5,6 +5,7 @@ from anthropic import Anthropic
 from anthropic.types import TextBlock
 
 from linear_chief.utils.logging import get_logger
+from linear_chief.utils.markdown import add_clickable_issue_links
 
 logger = get_logger(__name__)
 
@@ -59,9 +60,7 @@ class BriefingAgent:
         description = issue.get("description", "")
         if description:
             # Truncate long descriptions
-            description = (
-                description[:300] + "..." if len(description) > 300 else description
-            )
+            description = description[:300] + "..." if len(description) > 300 else description
             parts.append(f"Description: {description}")
 
         # Add recent comments
@@ -109,9 +108,7 @@ Guidelines:
         Returns:
             User prompt string
         """
-        formatted_issues = "\n\n---\n\n".join(
-            [self._format_issue(issue) for issue in issues]
-        )
+        formatted_issues = "\n\n---\n\n".join([self._format_issue(issue) for issue in issues])
 
         prompt = f"""Analyze these {len(issues)} Linear issues and create a morning briefing.
 
@@ -130,9 +127,7 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
 
         return prompt
 
-    def _add_clickable_links(
-        self, briefing: str, issues: List[Dict[str, Any]]
-    ) -> str:
+    def _add_clickable_links(self, briefing: str, issues: List[Dict[str, Any]]) -> str:
         """
         Post-process briefing to add clickable links for issue identifiers.
 
@@ -146,8 +141,6 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
         Returns:
             Briefing with clickable links
         """
-        import re
-
         # Build mapping of identifier -> URL
         issue_map = {}
         for issue in issues:
@@ -156,35 +149,8 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
             if identifier and url:
                 issue_map[identifier] = url
 
-        # Replace **IDENTIFIER** or **PREFIX IDENTIFIER:** with clickable links
-        # Preserves emoji and other prefixes
-        def replace_identifier(match):
-            prefix = match.group(1) or ""  # e.g., "🚨 " or ""
-            identifier = match.group(2)  # e.g., "DMD-480"
-            colon_inside = match.group(3) or ""  # Colon inside **
-            colon_outside = match.group(4) or ""  # Colon outside **
-
-            if identifier in issue_map:
-                url = issue_map[identifier]
-                # Create clickable link, preserving emoji prefix and colons
-                return f"[**{prefix}{identifier}{colon_inside}**]({url}){colon_outside}"
-            else:
-                return match.group(0)  # No URL available, keep original
-
-        # Match **[PREFIX] IDENTIFIER[:][**][:] with optional prefix (emoji, icons, etc.)
-        # Pattern handles:
-        # - **DMD-480**          -> plain
-        # - **🚨 DMD-480**       -> with emoji prefix
-        # - **DMD-480**:         -> colon outside
-        # - **DMD-480:**         -> colon inside
-        # Group 1: optional prefix (emoji + space, or other non-alphanumeric chars + space)
-        # Group 2: identifier (DMD-480)
-        # Group 3: optional colon inside **
-        # Group 4: optional colon outside **
-        pattern = r"\*\*((?:[^\*\w]*\s+)?)([A-Z][A-Z0-9]+-\d+)(:?)\*\*(:?)"
-        briefing_with_links = re.sub(pattern, replace_identifier, briefing)
-
-        return briefing_with_links
+        # Use shared utility to add links
+        return add_clickable_issue_links(briefing, issue_map)
 
     async def generate_briefing(
         self,
@@ -244,14 +210,24 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
                 )
                 raise ValueError(f"Expected TextBlock, got {type(content_block)}")
 
+            # Calculate cost
+            cost_usd = self.estimate_cost(
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+            )
+
             logger.info(
-                "Briefing generated successfully",
+                f"Briefing generated successfully "
+                f"(tokens: {response.usage.input_tokens} in, "
+                f"{response.usage.output_tokens} out, "
+                f"{response.usage.input_tokens + response.usage.output_tokens} total, "
+                f"cost: ${cost_usd:.4f})",
                 extra={
                     "service": "Anthropic",
                     "input_tokens": response.usage.input_tokens,
                     "output_tokens": response.usage.output_tokens,
-                    "total_tokens": response.usage.input_tokens
-                    + response.usage.output_tokens,
+                    "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                    "cost_usd": cost_usd,
                     "model": self.model,
                 },
             )

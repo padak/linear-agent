@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Linear Chief of Staff** is an autonomous AI agent that monitors Linear issues and generates intelligent briefings using Anthropic's Messages API. Built as a learning project to explore agent patterns, persistent memory, and semantic search.
 
-**Current Status:** Sessions 1-3 complete (Linear + Messages API + Telegram + Memory Layer + Intelligence + Scheduling + Storage + CLI). Sessions 4-5 pending (Testing + Deployment).
+**Current Status:** Sessions 1-6 complete (Phase 1 complete: Linear + Messages API + Bidirectional Telegram + Memory + Intelligence + Scheduling + Storage + CLI). Production-ready.
 
 ## Development Commands
 
@@ -44,12 +44,12 @@ python -m linear_chief history --days=7 --limit=10
 
 ### Running Tests
 ```bash
-# Run all tests (79 tests total)
+# Run all tests (417 tests total)
 python -m pytest tests/ -v
 
 # Run specific test suites
-python -m pytest tests/unit/ -v                    # Unit tests (30 tests)
-python -m pytest tests/integration/ -v             # Integration tests (49 tests)
+python -m pytest tests/unit/ -v                    # Unit tests (299 tests)
+python -m pytest tests/integration/ -v             # Integration tests (118 tests)
 python -m pytest tests/unit/test_storage.py -v     # Storage tests (16 tests)
 python -m pytest tests/unit/test_scheduler.py -v   # Scheduler tests (14 tests)
 
@@ -97,37 +97,57 @@ black src/ tests/ && ruff src/ tests/ && mypy src/
    - `TelegramBriefingBot` sends briefings via python-telegram-bot
    - Handles message chunking (>4096 chars)
 
-4. **`src/linear_chief/memory/`** - Persistent memory layer
+4. **`src/linear_chief/telegram/` (Bidirectional)** - Full two-way communication
+   - `TelegramApplication` - Main bot application wrapper
+   - `handlers.py` - Command and message handlers (/start, /help, /status, /briefing, text)
+   - `callbacks.py` - Callback query handlers (feedback buttons, issue actions)
+   - `keyboards.py` - Inline keyboard definitions
+   - Conversation mode with natural language queries
+   - Handles user feedback and interaction
+
+5. **`src/linear_chief/memory/`** - Persistent memory layer
    - `MemoryManager` wraps mem0 for briefing context + user preferences
    - `IssueVectorStore` uses ChromaDB + sentence-transformers for semantic search
    - In-memory fallback when mem0 not configured
    - All storage in `~/.linear_chief/` (configurable via .env)
 
-5. **`src/linear_chief/intelligence/`** - Issue analysis
+6. **`src/linear_chief/intelligence/`** - Issue analysis
    - `IssueAnalyzer` detects stagnation, blocking, calculates priority (1-10)
    - `AnalysisResult` dataclass with insights
 
-6. **`src/linear_chief/storage/`** - Persistent storage layer
+7. **`src/linear_chief/agent/conversation_agent.py`** - Intelligent conversation
+   - `ConversationAgent` handles natural language queries with Claude
+   - System prompt with user identity context
+   - Maintains 50-message conversation history
+   - Generates context-aware responses
+
+8. **`src/linear_chief/agent/context_builder.py`** - Context building
+   - Real-time issue fetching from Linear API
+   - Diacritic-aware user identity matching
+   - Builds rich context from DB + briefings + real-time data
+   - Auto-saves fetched issues for caching
+
+9. **`src/linear_chief/storage/`** - Persistent storage layer
    - SQLAlchemy ORM models (IssueHistory, Briefing, Metrics)
    - Repository pattern implementations
    - SQLite database with WAL mode for concurrency
 
-7. **`src/linear_chief/scheduling/`** - Automated scheduling
-   - `BriefingScheduler` wraps APScheduler with timezone support
-   - Daily briefing job with CronTrigger
-   - Manual trigger and graceful shutdown
+10. **`src/linear_chief/scheduling/`** - Automated scheduling
+    - `BriefingScheduler` wraps APScheduler with timezone support
+    - Daily briefing job with CronTrigger
+    - Manual trigger and graceful shutdown
 
-8. **`src/linear_chief/orchestrator.py`** - Main workflow coordinator
-   - 8-step workflow: Linear → Intelligence → Agent → Telegram
-   - Integrates memory, storage, and metrics
-   - Cost tracking and error handling
+11. **`src/linear_chief/orchestrator.py`** - Main workflow coordinator
+    - 8-step workflow: Linear → Intelligence → Agent → Telegram
+    - Integrates memory, storage, and metrics
+    - Cost tracking and error handling
 
-9. **`src/linear_chief/__main__.py`** - CLI interface
-   - Commands: init, test, briefing, start, metrics, history
-   - Rich table formatting for output
-   - Proper error handling and logging
+12. **`src/linear_chief/__main__.py`** - CLI interface
+    - Commands: init, test, briefing, start, metrics, history
+    - Rich table formatting for output
+    - Proper error handling and logging
 
-10. **`src/linear_chief/config.py`** - Configuration management
+13. **`src/linear_chief/config.py`** - Configuration management
     - Loads all settings from .env using python-decouple
     - `ensure_directories()` creates required paths
 
@@ -146,12 +166,24 @@ Orchestrator (8-step workflow)
 6. Agent (Messages API) → generate briefing
 7. Telegram → send message
 8. Storage → archive + metrics
+
+Conversation (User Query)
+    ↓
+TelegramApplication (handlers)
+    ↓
+ContextBuilder → fetch real-time issues + DB history
+    ↓
+ConversationAgent (Claude API) → generate response
+    ↓
+Telegram → send response
+    ↓
+Storage → save conversation history
 ```
 
 ### Storage Paths (Configurable via .env)
 
 All data stored in `~/.linear_chief/`:
-- `state.db` - SQLite database (issue history, briefings, metrics)
+- `state.db` - SQLite database (issue history, briefings, metrics, conversations, feedback)
 - `chromadb/` - Vector embeddings for semantic search
 - `mem0/` - mem0 local Qdrant storage + history.db
 - `logs/` - JSON-structured logs (future)
@@ -230,6 +262,38 @@ mem0 0.1.19 requires specific initialization:
 - Must deduplicate by issue ID (same issue can appear in multiple sources)
 - GraphQL errors often mean incorrect field nesting or filter syntax
 
+### Database Engine Singleton
+
+Database engine is created ONCE at startup and reused:
+- Don't call `get_engine()` repeatedly - it returns cached instance
+- Engine log message appears only once: "Database engine created: ..."
+- 8.9x performance improvement over creating engine per request
+- Reset engine for tests: `reset_engine()` function available
+
+### Real-time Issue Fetching
+
+Efficient GraphQL queries for single issues:
+- Use `get_issue_by_identifier("DMD-480")` not bulk fetch
+- Query uses filter: `{number: {eq: 480}, team: {key: {eq: "DMD"}}}`
+- 99.6% less data transfer vs fetching all 250 issues
+- Auto-saves to DB with 1-hour cache TTL (configurable)
+- Cache hit logs: "Using cached data for {issue_id}"
+
+### User Identity Matching
+
+Handles diacritics in names (Czech: ě, č, ř, š, ž):
+- Uses Unicode NFD normalization: "Šimeček" → "simecek"
+- Matches by email (most reliable) OR normalized name
+- `_is_user_assignee()` handles all matching logic
+- 25 comprehensive tests cover all edge cases
+
+### Token Usage Logging
+
+Visible console logging for all Claude API calls:
+- Format: `(tokens: 1234 in, 567 out, 1801 total, cost: $0.0122)`
+- Helps track budget: typical ~$0.05/day = $1.50/month
+- Structured data preserved in `extra` field for JSON logging
+
 ### ChromaDB Best Practices
 
 - Use `upsert()` instead of `add()` to prevent duplicate ID warnings
@@ -245,7 +309,7 @@ mem0 0.1.19 requires specific initialization:
 
 ### Test Execution Notes
 
-- All tests (79 total): `python -m pytest tests/ -v`
+- All tests (417 total): `python -m pytest tests/ -v`
 - `test_integration.py` requires all API keys (Linear, Anthropic, Telegram)
 - `test_memory_integration.py` downloads sentence-transformers model (~90MB) on first run
 - Integration tests with ChromaDB create persistent data in `~/.linear_chief/chromadb`
@@ -256,10 +320,27 @@ mem0 0.1.19 requires specific initialization:
 - **TOKENIZERS_PARALLELISM=false** - Prevents fork warnings from sentence-transformers
 - Add this to your `.env` file to suppress "huggingface/tokenizers forked" warnings
 
+### Conversation Configuration
+
+- **LINEAR_USER_EMAIL** - Your Linear email for filtering "my issues"
+- **LINEAR_USER_NAME** - Your name (supports diacritics: "Petr Šimeček")
+- **CONVERSATION_ENABLED** - Enable intelligent conversation (true/false)
+- **CONVERSATION_MAX_HISTORY** - Number of messages in history (default: 50)
+- **CONVERSATION_CONTEXT_DAYS** - Days of issue history for context (default: 30)
+- **CACHE_TTL_HOURS** - Issue cache duration before refetch (default: 1)
+
+### Telegram Mode
+
+- **TELEGRAM_MODE** - Bot operation mode:
+  - `send_only` - Only sends briefings (no interaction)
+  - `interactive` - Bidirectional communication with user queries
+
 ### Budget & Cost Tracking
 
 Target: **<$20/month**
-- Anthropic API: ~$1.80/month (30 briefings × 4K tokens × $0.003/1K)
+- Anthropic API: ~$1.50/month actual (daily briefing ~$0.03 + conversations ~$0.02/day)
+- Typical daily usage: ~$0.05/day (well under budget)
+- Token usage visible in console logs for monitoring
 - OpenAI API (mem0 embeddings): ~$0.10/month if used
 - All other components run locally (zero cost)
 
@@ -283,14 +364,23 @@ src/linear_chief/
 └── utils/           # Logging, retry (future)
 
 tests/
-├── unit/            # Unit tests with mocking (30 tests)
+├── unit/            # Unit tests with mocking (299 tests)
 │   ├── test_intelligence.py  # Intelligence layer tests (17 tests)
 │   ├── test_memory.py         # Memory layer tests (10 tests)
 │   ├── test_storage.py        # Storage layer tests (16 tests)
-│   └── test_scheduler.py      # Scheduler tests (14 tests)
-├── integration/     # Integration tests (49 tests)
+│   ├── test_scheduler.py      # Scheduler tests (14 tests)
+│   ├── test_telegram_handlers.py  # Telegram handlers (32 tests)
+│   ├── test_telegram_callbacks.py # Callback handlers (15 tests)
+│   ├── test_conversation_agent.py # Conversation agent (9 tests)
+│   ├── test_conversation_repository.py # Conversation storage (28 tests)
+│   ├── test_feedback_repository.py # Feedback storage (28 tests)
+│   ├── test_context_builder.py # Context building (27 tests)
+│   ├── test_user_matching.py # User identity matching (25 tests)
+│   └── test_markdown.py # Markdown utilities (19 tests)
+├── integration/     # Integration tests (118 tests)
 │   ├── test_embeddings.py     # Embedding tests (8 tests)
 │   └── test_workflow.py       # Workflow tests (6 tests)
+├── manual/          # Manual test scripts (8 scripts)
 └── fixtures/        # Test data
 
 scripts/

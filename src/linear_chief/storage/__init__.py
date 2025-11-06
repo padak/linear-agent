@@ -6,12 +6,21 @@ from linear_chief.storage.database import (
     init_db,
     get_session_maker,
     get_db_session,
+    reset_engine,
 )
-from linear_chief.storage.models import IssueHistory, Briefing, Metrics
+from linear_chief.storage.models import (
+    IssueHistory,
+    Briefing,
+    Metrics,
+    Conversation,
+    Feedback,
+)
 from linear_chief.storage.repositories import (
     IssueHistoryRepository,
     BriefingRepository,
     MetricsRepository,
+    ConversationRepository,
+    FeedbackRepository,
 )
 
 __all__ = [
@@ -20,10 +29,15 @@ __all__ = [
     "init_db",
     "get_session_maker",
     "get_db_session",
+    "reset_engine",
     "IssueHistory",
     "Briefing",
     "Metrics",
+    "Conversation",
+    "Feedback",
     "IssueHistoryRepository",
     "BriefingRepository",
     "MetricsRepository",
+    "ConversationRepository",
+    "FeedbackRepository",
 ]

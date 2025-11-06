@@ -182,6 +182,79 @@ class TestIssueHistoryRepository:
         assert "PROJ-123" in issue_ids
         assert "PROJ-456" in issue_ids
 
+    def test_get_issue_snapshot_by_identifier_fresh(self, issue_repo):
+        """Test retrieving fresh issue snapshot by identifier."""
+        # Create recent snapshot
+        issue_repo.save_snapshot(
+            issue_id="PROJ-123",
+            linear_id="uuid-123",
+            title="Fresh Issue",
+            state="In Progress",
+        )
+
+        # Should return fresh snapshot (< 1 hour old)
+        snapshot = issue_repo.get_issue_snapshot_by_identifier(
+            "PROJ-123", max_age_hours=1
+        )
+        assert snapshot is not None
+        assert snapshot.issue_id == "PROJ-123"
+        assert snapshot.title == "Fresh Issue"
+        assert snapshot.state == "In Progress"
+
+    def test_get_issue_snapshot_by_identifier_stale(self, issue_repo):
+        """Test that stale snapshots are not returned."""
+        # Create snapshot
+        snapshot = issue_repo.save_snapshot(
+            issue_id="PROJ-123",
+            linear_id="uuid-123",
+            title="Stale Issue",
+            state="In Progress",
+        )
+
+        # Manually set old timestamp (2 hours ago)
+        snapshot.snapshot_at = datetime.utcnow() - timedelta(hours=2)
+        issue_repo.session.commit()
+
+        # Should return None for stale snapshot (max_age_hours=1)
+        result = issue_repo.get_issue_snapshot_by_identifier(
+            "PROJ-123", max_age_hours=1
+        )
+        assert result is None
+
+    def test_get_issue_snapshot_by_identifier_not_found(self, issue_repo):
+        """Test that None is returned for non-existent issue."""
+        result = issue_repo.get_issue_snapshot_by_identifier(
+            "NONEXISTENT", max_age_hours=1
+        )
+        assert result is None
+
+    def test_get_issue_snapshot_by_identifier_custom_max_age(self, issue_repo):
+        """Test custom max_age_hours parameter."""
+        # Create snapshot
+        snapshot = issue_repo.save_snapshot(
+            issue_id="PROJ-123",
+            linear_id="uuid-123",
+            title="Test Issue",
+            state="In Progress",
+        )
+
+        # Manually set timestamp (2 hours ago)
+        snapshot.snapshot_at = datetime.utcnow() - timedelta(hours=2)
+        issue_repo.session.commit()
+
+        # Should return None with max_age_hours=1
+        result = issue_repo.get_issue_snapshot_by_identifier(
+            "PROJ-123", max_age_hours=1
+        )
+        assert result is None
+
+        # Should return snapshot with max_age_hours=3
+        result = issue_repo.get_issue_snapshot_by_identifier(
+            "PROJ-123", max_age_hours=3
+        )
+        assert result is not None
+        assert result.issue_id == "PROJ-123"
+
 
 class TestBriefing:
     """Tests for Briefing model."""

@@ -6,6 +6,8 @@ from decouple import config
 # Linear API Configuration
 LINEAR_API_KEY = config("LINEAR_API_KEY", default="")
 LINEAR_WORKSPACE_ID = config("LINEAR_WORKSPACE_ID", default="")
+LINEAR_USER_EMAIL = config("LINEAR_USER_EMAIL", default="")
+LINEAR_USER_NAME = config("LINEAR_USER_NAME", default="")
 
 # Anthropic API Configuration
 ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
@@ -16,6 +18,7 @@ OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
 # Telegram Bot Configuration
 TELEGRAM_BOT_TOKEN = config("TELEGRAM_BOT_TOKEN", default="")
 TELEGRAM_CHAT_ID = config("TELEGRAM_CHAT_ID", default="")
+TELEGRAM_MODE = config("TELEGRAM_MODE", default="send_only")  # "send_only" or "interactive"
 
 # mem0 Configuration
 MEM0_API_KEY = config("MEM0_API_KEY", default="")
@@ -37,8 +40,16 @@ LOGS_PATH = Path(config("LOGS_PATH", default="~/.linear_chief/logs")).expanduser
 # Embedding Model Configuration
 EMBEDDING_MODEL = config("EMBEDDING_MODEL", default="all-MiniLM-L6-v2")
 
+# Cache Configuration
+CACHE_TTL_HOURS = config("CACHE_TTL_HOURS", default=1, cast=int)
+
 # Cost Tracking
 MONTHLY_BUDGET_USD = config("MONTHLY_BUDGET_USD", default=20.0, cast=float)
+
+# Conversation Configuration
+CONVERSATION_ENABLED = config("CONVERSATION_ENABLED", default="true", cast=bool)
+CONVERSATION_MAX_HISTORY = config("CONVERSATION_MAX_HISTORY", default=50, cast=int)
+CONVERSATION_CONTEXT_DAYS = config("CONVERSATION_CONTEXT_DAYS", default=30, cast=int)
 
 # Logging Configuration
 LOG_LEVEL = config("LOG_LEVEL", default="INFO")

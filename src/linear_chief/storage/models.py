@@ -105,3 +105,60 @@ class Metrics(Base):
 
     def __repr__(self) -> str:
         return f"<Metrics(type={self.metric_type}, name={self.metric_name}, value={self.value}, unit={self.unit})>"
+
+
+class Conversation(Base):
+    """
+    Store user conversation history for bidirectional Telegram bot.
+
+    Tracks all user and assistant messages to maintain conversation context
+    and enable natural dialogue with the Linear Chief of Staff agent.
+    """
+
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(100), nullable=False)  # Telegram user_id
+    chat_id = Column(String(100), nullable=False)  # Telegram chat_id
+    message = Column(Text, nullable=False)  # Message content
+    role = Column(String(20), nullable=False)  # 'user' or 'assistant'
+    timestamp = Column(DateTime, nullable=False, default=func.now())
+    extra_metadata = Column(
+        JSON, nullable=True
+    )  # Additional fields (message_id, reply_to, etc.)
+
+    __table_args__ = (
+        Index("ix_conversations_user_id", "user_id"),
+        Index("ix_conversations_chat_id", "chat_id"),
+        Index("ix_conversations_timestamp", "timestamp"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Conversation(user_id={self.user_id}, role={self.role}, timestamp={self.timestamp})>"
+
+
+class Feedback(Base):
+    """
+    Store user feedback on briefings and issue interactions.
+
+    Tracks positive/negative feedback on briefings and user actions
+    on specific issues to improve future briefings.
+    """
+
+    __tablename__ = "feedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(100), nullable=False, index=True)  # Telegram user ID
+    briefing_id = Column(Integer, nullable=True)  # FK to briefings table
+    feedback_type = Column(
+        String(20), nullable=False, index=True
+    )  # 'positive', 'negative', 'issue_action'
+    timestamp = Column(DateTime, nullable=False, default=func.now(), index=True)
+    extra_metadata = Column(
+        JSON, nullable=True
+    )  # Additional context (telegram_message_id, action details, etc.)
+
+    __table_args__ = (Index("ix_feedback_user_time", "user_id", "timestamp"),)
+
+    def __repr__(self) -> str:
+        return f"<Feedback(user_id={self.user_id}, type={self.feedback_type}, timestamp={self.timestamp})>"

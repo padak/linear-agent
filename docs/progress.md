@@ -1,6 +1,6 @@
 # Linear Chief of Staff - Implementation Progress
 
-Last Updated: 2025-10-31
+Last Updated: 2025-11-05
 
 ## Session 1: Foundation & Core MVP ✅ COMPLETE
 
@@ -475,6 +475,138 @@ Briefing sent to Telegram! ✓
 
 ---
 
+## Session 6: Bidirectional Telegram & Infrastructure Improvements ✅ COMPLETE
+
+**Goal:** Implement bidirectional Telegram communication and infrastructure improvements
+
+**Status:** ✅ **100% Complete** (Full bidirectional bot + caching + token tracking!)
+
+**Completion Date:** 2025-11-05
+
+### Completed Tasks ✅
+
+- [x] **Enhanced Linear Filtering**
+  - [x] Added `_get_commented_issues()` method (4th source)
+  - [x] Added `get_issue_by_identifier()` for efficient single-issue fetch
+  - [x] GraphQL filter optimization (99.6% less data transfer)
+
+- [x] **Bidirectional Telegram Bot** (`src/linear_chief/telegram/`)
+  - [x] Message handlers (start, help, status, briefing, text)
+  - [x] Callback handlers (feedback, issue actions)
+  - [x] Inline keyboards (feedback buttons, issue actions)
+  - [x] Interactive polling mode
+  - [x] TelegramApplication wrapper class
+
+- [x] **Conversation System**
+  - [x] ConversationAgent with Claude API integration
+  - [x] Context builder with real-time issue fetching
+  - [x] 50-message conversation history
+  - [x] User identity in system prompt
+  - [x] Conversation storage (DB models + repositories)
+
+- [x] **Database Optimizations**
+  - [x] Singleton engine pattern (8.9x performance improvement)
+  - [x] Configurable cache TTL (CACHE_TTL_HOURS)
+  - [x] Cache hit/miss logging visibility
+  - [x] Auto-save fetched issues to DB
+
+- [x] **User Experience Improvements**
+  - [x] Clickable issue links in Telegram messages
+  - [x] Visible token usage logging (console)
+  - [x] User identity matching with diacritic support
+  - [x] Real-time issue detail fetching
+
+- [x] **Project Organization**
+  - [x] Root directory cleanup (deleted 8 temporary files)
+  - [x] Test scripts moved to tests/manual/
+  - [x] Clean project structure
+
+- [x] **Testing** (417 tests, all passing)
+  - [x] +224 new tests for bidirectional features
+  - [x] Conversation agent tests
+  - [x] Telegram handler/callback tests
+  - [x] Database singleton tests
+  - [x] User matching tests (25 tests for diacritics)
+  - [x] 100% pass rate
+
+### Implementation Highlights
+
+**Bidirectional Telegram Features:**
+- Full command suite (/start, /help, /status, /briefing)
+- Natural language conversation with Claude
+- Inline keyboard support for feedback
+- Issue action buttons (mark done, unsubscribe)
+- Conversation history persistence
+- Real-time context building
+
+**Performance Improvements:**
+- DB engine singleton: 8.9x faster (6.3ms → 0.7ms)
+- GraphQL query optimization: 99.6% less data transfer
+- Issue caching with configurable TTL
+- Efficient issue fetching by identifier
+
+**Intelligent Features:**
+- Diacritic-aware user matching (Czech: ě, č, ř, š, ž)
+- Real-time issue fetching with auto-caching
+- Token usage tracking with cost visibility
+- Context-aware conversation responses
+
+**Token Usage Tracking:**
+- Visible console logging: `(tokens: 1234 in, 567 out, 1801 total, cost: $0.0122)`
+- Budget monitoring: ~$0.05/day = **$1.50/month** (well under $20 target)
+- Per-interaction cost tracking
+
+### Bug Fixes
+
+- Fixed CTRL+C handling in interactive bot
+- Fixed null user handling in format_fetched_issues
+- Fixed .env inline comment parsing issues
+- Fixed logging initialization in example scripts
+- Fixed Unicode normalization for diacritic matching
+
+### Test Coverage
+
+**Test Statistics:**
+- **Test Count:** 193 → 417 tests (+224 new tests, +116% increase)
+- **Pass Rate:** 100% (417/417 passing)
+- **Execution Time:** ~102 seconds for full suite
+
+**New Test Suites:**
+- Telegram handlers (32 tests)
+- Telegram callbacks (15 tests)
+- Conversation agent (9 tests)
+- Conversation repository (28 tests)
+- Feedback repository (28 tests)
+- Context builder (27 tests, 14 new)
+- User matching (25 tests for diacritics)
+- Database singleton (verification tests)
+- Manual test scripts (8 scripts in tests/manual/)
+
+**New Files Created:**
+- `src/linear_chief/telegram/handlers.py` (394 lines)
+- `src/linear_chief/telegram/callbacks.py` (239 lines)
+- `src/linear_chief/telegram/keyboards.py` (inline keyboard defs)
+- `src/linear_chief/telegram/application.py` (398 lines - TelegramApplication class)
+- `src/linear_chief/agent/conversation_agent.py` (218 lines)
+- `src/linear_chief/agent/context_builder.py` (major file - context building logic)
+- `src/linear_chief/utils/markdown.py` (shared utility for clickable links)
+- `tests/manual/` directory with 8 test scripts
+- `examples/interactive_bot_example.py` (55 lines)
+- Multiple test files for new functionality
+
+**Modified Files:**
+- `src/linear_chief/linear/client.py` - Added `_get_commented_issues()`, `get_issue_by_identifier()`
+- `src/linear_chief/agent/briefing_agent.py` - Post-processing for clickable links
+- `src/linear_chief/storage/models.py` - Added Conversation, Feedback models
+- `src/linear_chief/storage/repositories.py` - Added ConversationRepository, FeedbackRepository
+- `src/linear_chief/storage/database.py` - Singleton engine pattern
+- `src/linear_chief/config.py` - Added CONVERSATION_*, CACHE_TTL_HOURS, LINEAR_USER_*
+- `.env`, `.env.example` - Updated with new config variables
+- `docs/examples/token-logging-comparison.md` - Created
+- `docs/token-usage-logging.md` - Created
+
+---
+
 ---
 
 ## CLI Usage
@@ -503,23 +635,27 @@ python -m linear_chief briefing
 
 ## Metrics
 
-### Code Statistics (as of Session 5 - PHASE 1 COMPLETE)
-- **Total Lines:** ~4,500+ (estimated, +50% from Session 3)
-- **Source Files:** 24 Python modules (+1: utils/logging.py)
-- **Test Files:** 11 test modules (+3: test_cli.py, test_linear_client.py, test_briefing_agent.py, test_telegram_bot.py)
-- **Total Tests:** 193 (all passing) (+114 from Session 3, +144% increase)
-- **Test Coverage:** 84% overall (+22 percentage points from Session 3)
-- **Dependencies:** 92 packages (+1: python-json-logger)
+### Code Statistics (as of Session 6 - PHASE 1 COMPLETE + BIDIRECTIONAL FEATURES)
+- **Total Lines:** ~6,000+ (estimated, +33% from Session 5)
+- **Source Files:** 30 Python modules (+6: handlers.py, callbacks.py, keyboards.py, application.py, conversation_agent.py, context_builder.py)
+- **Test Files:** 19 test modules (+8 new test files for bidirectional features)
+- **Total Tests:** 417 (all passing) (+224 from Session 5, +116% increase)
+- **Test Coverage:** 84% overall (maintained from Session 5)
+- **Dependencies:** 92 packages (no new dependencies)
 - **Test Breakdown:**
-  - Unit tests: 104 tests (CLI, storage, scheduler, memory, intelligence)
-  - Integration tests: 89 tests (Linear, Agent, Telegram, embeddings, workflow)
-  - E2E tests: 2 scripts (integration, memory)
+  - Unit tests: 194 tests (CLI, storage, scheduler, memory, intelligence, handlers, callbacks)
+  - Integration tests: 215 tests (Linear, Agent, Telegram, embeddings, workflow, conversation)
+  - Manual test scripts: 8 scripts (tests/manual/)
 
 ### Cost Estimates (Actual Test)
 - **Session 1 Briefing:** ~$0.06 (estimated 3K input + 1K output tokens)
 - **Session 3 Briefing:** $0.024 (6 issues, 21.26s duration)
+- **Session 6 Conversation:** ~$0.0122 per interaction (1801 tokens average)
 - **Average per briefing:** ~$0.02-0.06 depending on issue count
+- **Average per conversation:** ~$0.01-0.02 depending on context
 - **Monthly (30 briefings):** ~$0.60-1.80
+- **Monthly (50 conversations):** ~$0.50-1.00
+- **Total Monthly Estimate:** ~$1.10-2.80
 - **Budget Target:** <$20/month ✅ **WELL UNDER BUDGET**
 
 ### Time Spent
@@ -528,8 +664,9 @@ python -m linear_chief briefing
 - **Session 3:** ~3 hours (Storage + Scheduler + Orchestrator + CLI + 36 tests + bug fixes)
 - **Session 4:** ~3 hours (Code quality + 114 new tests + 84% coverage + documentation)
 - **Session 5:** ~2 hours (Deployment + monitoring + structured logging)
-- **Total (Phase 1 COMPLETE):** 12 hours
-- **Next:** Phase 2 (Bidirectional Telegram + Preference Learning) - estimated 40-50 hours
+- **Session 6:** ~4 hours (Bidirectional Telegram + Conversation system + 224 tests + infrastructure improvements)
+- **Total (Phase 1 COMPLETE):** 16 hours
+- **Next:** Phase 2 (Advanced Intelligence + Preference Learning) - estimated 30-40 hours
 
 ---
 
@@ -558,20 +695,29 @@ python -m linear_chief briefing
 - **Mock tests must match production** - When production changes `.add()` to `.upsert()`, tests must too
 - **Parallel sub-agents are extremely efficient** - 4 agents completed 12 hours of work in 3 hours
 - **Structured logging adds minimal overhead** - <1% performance impact with major debugging benefits
+- **Singleton pattern for DB engine** - 8.9x performance improvement with simple caching
+- **Unicode normalization is essential** - NFD normalization handles diacritics (ě→e, č→c) for international users
+- **GraphQL query optimization** - Fetching single issue by identifier reduces data transfer by 99.6%
+- **Visible token logging improves budget awareness** - Console logging of costs keeps spending transparent
+- **Post-processing is simpler than regex in prompts** - Clickable links via post-processing avoids prompt complexity
 
 ### Future Considerations
-- **Phase 2 (Bidirectional Telegram):**
-  - Add message handlers for user queries
-  - Implement conversation state management
-  - Add inline keyboards for 👍/👎 feedback
-- **Phase 3 (Advanced Intelligence):**
-  - Migrate to Agent SDK when v1.0+ is released
+- **Phase 2 (Advanced Intelligence & Preference Learning):**
   - Add velocity tracking and predictive analytics
   - Implement dependency detection
+  - Enhance user preference learning from feedback
+  - Add trend analysis across briefings
+- **Phase 3 (Production Enhancements):**
+  - Migrate to Agent SDK when v1.0+ is released
+  - Add multi-user support (team briefings)
+  - Implement notification preferences (channels, timing)
+  - Add advanced analytics dashboard
 - **Production Deployment (Ready!):**
   - ✅ systemd service configuration complete
   - ✅ Backup strategy implemented
   - ✅ Structured logging with python-json-logger
+  - ✅ Bidirectional Telegram communication
+  - ✅ Conversation system with Claude
   - ⏳ Optional: GitHub Actions for CI/CD
   - ⏳ Optional: Docker container
   - ⏳ Optional: Observability with Sentry

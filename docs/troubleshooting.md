@@ -94,6 +94,12 @@ journalctl -u linear-chief -f
 # If running manually, check stdout/stderr
 # Add this to your .env for verbose logging:
 # LOG_LEVEL=DEBUG
+
+# When running interactive bot or test scripts
+# Logs appear in console (stderr) by default
+# Cache hit/miss messages show as:
+# INFO: Using cached data for AI-1819
+# INFO: Fetching CSM-93 from Linear API
 ```
 
 ---

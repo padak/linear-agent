@@ -8,6 +8,7 @@ from linear_chief.utils.logging import get_logger, LogContext
 from linear_chief.linear import LinearClient
 from linear_chief.agent import BriefingAgent
 from linear_chief.telegram.bot import TelegramBriefingBot
+from linear_chief.telegram.application import TelegramApplication
 from linear_chief.intelligence import IssueAnalyzer
 from linear_chief.memory import MemoryManager, IssueVectorStore
 from linear_chief.storage import (
@@ -22,6 +23,7 @@ from linear_chief.config import (
     ANTHROPIC_API_KEY,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
+    TELEGRAM_MODE,
 )
 
 logger = get_logger(__name__)
@@ -40,6 +42,7 @@ class BriefingOrchestrator:
         anthropic_api_key: str = ANTHROPIC_API_KEY,
         telegram_bot_token: str = TELEGRAM_BOT_TOKEN,
         telegram_chat_id: str = TELEGRAM_CHAT_ID,
+        telegram_mode: str = TELEGRAM_MODE,
     ):
         """
         Initialize orchestrator with API credentials.
@@ -49,14 +52,29 @@ class BriefingOrchestrator:
             anthropic_api_key: Anthropic API key
             telegram_bot_token: Telegram bot token
             telegram_chat_id: Telegram chat ID
+            telegram_mode: Telegram mode ("send_only" or "interactive")
         """
         # Initialize clients
         self.linear_client = LinearClient(api_key=linear_api_key)
         self.agent = BriefingAgent(api_key=anthropic_api_key)
-        self.telegram_bot = TelegramBriefingBot(
-            bot_token=telegram_bot_token,
-            chat_id=telegram_chat_id,
-        )
+
+        # Initialize Telegram bot based on mode
+        self.telegram_mode = telegram_mode
+        if telegram_mode == "interactive":
+            # Use new bidirectional application
+            self.telegram_bot = TelegramApplication(
+                bot_token=telegram_bot_token,
+                chat_id=telegram_chat_id,
+                polling=False,  # Don't start polling in orchestrator
+            )
+            logger.info("Using interactive Telegram mode (TelegramApplication)")
+        else:
+            # Use original send-only bot (backward compatible)
+            self.telegram_bot = TelegramBriefingBot(
+                bot_token=telegram_bot_token,
+                chat_id=telegram_chat_id,
+            )
+            logger.info("Using send-only Telegram mode (TelegramBriefingBot)")
 
         # Initialize intelligence and memory layers
         self.analyzer = IssueAnalyzer()
@@ -66,7 +84,13 @@ class BriefingOrchestrator:
         # Database session maker
         self.session_maker = get_session_maker()
 
-        logger.info("Orchestrator initialized", extra={"component": "orchestrator"})
+        logger.info(
+            "Orchestrator initialized",
+            extra={
+                "component": "orchestrator",
+                "telegram_mode": telegram_mode,
+            },
+        )
 
     async def generate_and_send_briefing(self) -> Dict[str, Any]:
         """
@@ -79,8 +103,12 @@ class BriefingOrchestrator:
         4. Add issues to vector store
         5. Get agent context from memory
         6. Generate briefing via Agent SDK
-        7. Send briefing via Telegram
+        7. Send briefing via Telegram (with feedback keyboard if interactive mode)
         8. Archive briefing and metrics to database
+
+        Note on Telegram modes:
+        - send_only: Uses TelegramBriefingBot for simple message delivery
+        - interactive: Uses TelegramApplication with feedback keyboards and handlers
 
         Returns:
             Dict with workflow results (success, briefing_id, metrics, error)
@@ -225,6 +253,9 @@ class BriefingOrchestrator:
 
                 # Step 7: Send briefing via Telegram
                 logger.info("Step 7/8: Sending briefing via Telegram")
+
+                # Note: briefing_id not available yet - will be created in Step 8
+                # For interactive mode, we'll update the briefing record after creation
                 telegram_success = await self.telegram_bot.send_briefing(
                     briefing_content
                 )

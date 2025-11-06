@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 import logging
 
-from linear_chief.storage.models import IssueHistory, Briefing, Metrics
+from linear_chief.storage.models import (
+    IssueHistory,
+    Briefing,
+    Metrics,
+    Conversation,
+    Feedback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +153,34 @@ class IssueHistoryRepository:
                 & (IssueHistory.snapshot_at == subquery.c.max_snapshot),
             )
             .all()
+        )
+
+    def get_issue_snapshot_by_identifier(
+        self, issue_id: str, max_age_hours: int = 1
+    ) -> Optional[IssueHistory]:
+        """
+        Get issue snapshot by identifier if it exists and is fresh.
+
+        Used for intelligent caching - returns cached data if recent enough,
+        otherwise returns None to trigger fresh API fetch.
+
+        Args:
+            issue_id: Issue identifier (e.g., "PROJ-123")
+            max_age_hours: Maximum age of snapshot in hours (default: 1 hour)
+
+        Returns:
+            Latest IssueHistory if found and fresh, None if not found or stale
+        """
+        cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+
+        return (
+            self.session.query(IssueHistory)
+            .filter(
+                IssueHistory.issue_id == issue_id,
+                IssueHistory.snapshot_at >= cutoff,
+            )
+            .order_by(desc(IssueHistory.snapshot_at))
+            .first()
         )
 
 
@@ -402,4 +436,456 @@ class MetricsRepository:
             "min": result.min or 0.0,
             "max": result.max or 0.0,
             "count": result.count or 0,
+        }
+
+
+class ConversationRepository:
+    """Repository for Conversation model operations."""
+
+    def __init__(self, session: Session):
+        """
+        Initialize repository with database session.
+
+        Args:
+            session: SQLAlchemy session
+        """
+        self.session = session
+
+    def save_message(
+        self,
+        user_id: str,
+        chat_id: str,
+        message: str,
+        role: str,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Conversation:
+        """
+        Save a conversation message (user or assistant).
+
+        Args:
+            user_id: Telegram user ID
+            chat_id: Telegram chat ID
+            message: Message content
+            role: Message role ('user' or 'assistant')
+            extra_metadata: Additional fields (message_id, reply_to, etc.)
+
+        Returns:
+            Created Conversation instance
+
+        Raises:
+            ValueError: If role is not 'user' or 'assistant'
+        """
+        if role not in ("user", "assistant"):
+            raise ValueError(f"Invalid role: {role}. Must be 'user' or 'assistant'")
+
+        conversation = Conversation(
+            user_id=user_id,
+            chat_id=chat_id,
+            message=message,
+            role=role,
+            extra_metadata=extra_metadata,
+        )
+
+        self.session.add(conversation)
+        self.session.commit()
+        self.session.refresh(conversation)
+
+        logger.debug(f"Saved {role} message for user {user_id}")
+        return conversation
+
+    def get_conversation_history(
+        self,
+        user_id: str,
+        limit: int = 20,
+        since_hours: Optional[int] = None,
+    ) -> List[Conversation]:
+        """
+        Get recent conversation history for a user.
+
+        Args:
+            user_id: Telegram user ID
+            limit: Maximum number of messages to return
+            since_hours: Optional filter to only get messages from last N hours
+
+        Returns:
+            List of Conversation instances, ordered chronologically (oldest first)
+        """
+        query = self.session.query(Conversation).filter(Conversation.user_id == user_id)
+
+        if since_hours is not None:
+            cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+            query = query.filter(Conversation.timestamp >= cutoff)
+
+        # Order by timestamp descending, then by ID descending (most recent first)
+        # This ensures we get the most recent N messages
+        conversations = (
+            query.order_by(desc(Conversation.timestamp), desc(Conversation.id))
+            .limit(limit)
+            .all()
+        )
+
+        # Reverse to get chronological order (oldest first)
+        return list(reversed(conversations))
+
+    def get_user_context(self, user_id: str, limit: int = 10) -> str:
+        """
+        Get formatted conversation context for agent prompt.
+
+        Args:
+            user_id: Telegram user ID
+            limit: Maximum number of recent messages to include
+
+        Returns:
+            Formatted conversation history as string
+        """
+        conversations = self.get_conversation_history(user_id, limit=limit)
+
+        if not conversations:
+            return "No previous conversation history."
+
+        context_lines = []
+        for conv in conversations:
+            # Format: "User: message" or "Assistant: message"
+            role_label = "User" if conv.role == "user" else "Assistant"
+            context_lines.append(f"{role_label}: {conv.message}")
+
+        return "\n".join(context_lines)
+
+    def clear_old_conversations(self, days: int = 30) -> int:
+        """
+        Delete conversations older than N days for data retention.
+
+        Args:
+            days: Number of days to retain
+
+        Returns:
+            Number of conversations deleted
+        """
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        count = (
+            self.session.query(Conversation)
+            .filter(Conversation.timestamp < cutoff)
+            .delete()
+        )
+
+        self.session.commit()
+        logger.info(f"Deleted {count} conversations older than {days} days")
+        return count
+
+    def get_active_users(self, since_days: int = 7) -> List[str]:
+        """
+        Get list of user IDs who have had conversations in the last N days.
+
+        Args:
+            since_days: Number of days to look back
+
+        Returns:
+            List of unique user IDs
+        """
+        cutoff = datetime.utcnow() - timedelta(days=since_days)
+
+        results = (
+            self.session.query(Conversation.user_id)
+            .filter(Conversation.timestamp >= cutoff)
+            .distinct()
+            .all()
+        )
+
+        return [row[0] for row in results]
+
+    def get_conversation_stats(self, user_id: str, days: int = 7) -> Dict[str, Any]:
+        """
+        Get conversation statistics for a user.
+
+        Args:
+            user_id: Telegram user ID
+            days: Number of days to analyze
+
+        Returns:
+            Dict with total_messages, user_messages, assistant_messages, first_message, last_message
+        """
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        # Total messages
+        total = (
+            self.session.query(func.count(Conversation.id))
+            .filter(
+                Conversation.user_id == user_id,
+                Conversation.timestamp >= cutoff,
+            )
+            .scalar()
+        )
+
+        # User messages
+        user_count = (
+            self.session.query(func.count(Conversation.id))
+            .filter(
+                Conversation.user_id == user_id,
+                Conversation.role == "user",
+                Conversation.timestamp >= cutoff,
+            )
+            .scalar()
+        )
+
+        # Assistant messages
+        assistant_count = (
+            self.session.query(func.count(Conversation.id))
+            .filter(
+                Conversation.user_id == user_id,
+                Conversation.role == "assistant",
+                Conversation.timestamp >= cutoff,
+            )
+            .scalar()
+        )
+
+        # First and last message timestamps
+        first_msg = (
+            self.session.query(Conversation.timestamp)
+            .filter(
+                Conversation.user_id == user_id,
+                Conversation.timestamp >= cutoff,
+            )
+            .order_by(Conversation.timestamp)
+            .first()
+        )
+
+        last_msg = (
+            self.session.query(Conversation.timestamp)
+            .filter(
+                Conversation.user_id == user_id,
+                Conversation.timestamp >= cutoff,
+            )
+            .order_by(desc(Conversation.timestamp))
+            .first()
+        )
+
+        return {
+            "total_messages": total or 0,
+            "user_messages": user_count or 0,
+            "assistant_messages": assistant_count or 0,
+            "first_message": first_msg[0] if first_msg else None,
+            "last_message": last_msg[0] if last_msg else None,
+        }
+
+
+class FeedbackRepository:
+    """Repository for Feedback model operations."""
+
+    def __init__(self, session: Session):
+        """
+        Initialize repository with database session.
+
+        Args:
+            session: SQLAlchemy session
+        """
+        self.session = session
+
+    def save_feedback(
+        self,
+        user_id: str,
+        briefing_id: Optional[int],
+        feedback_type: str,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Feedback:
+        """
+        Save user feedback on briefings or issue actions.
+
+        Args:
+            user_id: Telegram user ID
+            briefing_id: Briefing ID (optional, can be None for issue actions)
+            feedback_type: Type of feedback ('positive', 'negative', 'issue_action')
+            extra_metadata: Additional context (telegram_message_id, action details, etc.)
+
+        Returns:
+            Created Feedback instance
+
+        Raises:
+            ValueError: If feedback_type is invalid
+        """
+        valid_types = ("positive", "negative", "issue_action")
+        if feedback_type not in valid_types:
+            raise ValueError(
+                f"Invalid feedback_type: {feedback_type}. "
+                f"Must be one of {valid_types}"
+            )
+
+        feedback = Feedback(
+            user_id=user_id,
+            briefing_id=briefing_id,
+            feedback_type=feedback_type,
+            extra_metadata=extra_metadata,
+        )
+
+        self.session.add(feedback)
+        self.session.commit()
+        self.session.refresh(feedback)
+
+        logger.debug(f"Saved {feedback_type} feedback from user {user_id}")
+        return feedback
+
+    def get_user_feedback_stats(self, user_id: str, days: int = 30) -> Dict[str, Any]:
+        """
+        Get feedback statistics for a specific user.
+
+        Args:
+            user_id: Telegram user ID
+            days: Number of days to analyze
+
+        Returns:
+            Dict with positive_count, negative_count, issue_action_count, total_count
+        """
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        # Count by feedback type
+        positive_count = (
+            self.session.query(func.count(Feedback.id))
+            .filter(
+                Feedback.user_id == user_id,
+                Feedback.feedback_type == "positive",
+                Feedback.timestamp >= cutoff,
+            )
+            .scalar()
+        )
+
+        negative_count = (
+            self.session.query(func.count(Feedback.id))
+            .filter(
+                Feedback.user_id == user_id,
+                Feedback.feedback_type == "negative",
+                Feedback.timestamp >= cutoff,
+            )
+            .scalar()
+        )
+
+        issue_action_count = (
+            self.session.query(func.count(Feedback.id))
+            .filter(
+                Feedback.user_id == user_id,
+                Feedback.feedback_type == "issue_action",
+                Feedback.timestamp >= cutoff,
+            )
+            .scalar()
+        )
+
+        total_count = (
+            (positive_count or 0) + (negative_count or 0) + (issue_action_count or 0)
+        )
+
+        return {
+            "positive_count": positive_count or 0,
+            "negative_count": negative_count or 0,
+            "issue_action_count": issue_action_count or 0,
+            "total_count": total_count,
+            "satisfaction_rate": (
+                round((positive_count or 0) / total_count * 100, 1)
+                if total_count > 0
+                else 0.0
+            ),
+        }
+
+    def get_recent_feedback(
+        self,
+        days: int = 7,
+        limit: int = 100,
+        feedback_type: Optional[str] = None,
+    ) -> List[Feedback]:
+        """
+        Get recent feedback entries.
+
+        Args:
+            days: Number of days to look back
+            limit: Maximum number of entries to return
+            feedback_type: Optional filter by feedback type
+
+        Returns:
+            List of Feedback instances, ordered by timestamp descending
+        """
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        query = self.session.query(Feedback).filter(Feedback.timestamp >= cutoff)
+
+        if feedback_type:
+            query = query.filter(Feedback.feedback_type == feedback_type)
+
+        return query.order_by(desc(Feedback.timestamp)).limit(limit).all()
+
+    def get_briefing_feedback(self, briefing_id: int) -> List[Feedback]:
+        """
+        Get all feedback for a specific briefing.
+
+        Args:
+            briefing_id: Briefing ID
+
+        Returns:
+            List of Feedback instances for the briefing
+        """
+        return (
+            self.session.query(Feedback)
+            .filter(Feedback.briefing_id == briefing_id)
+            .order_by(desc(Feedback.timestamp))
+            .all()
+        )
+
+    def get_overall_feedback_stats(self, days: int = 30) -> Dict[str, Any]:
+        """
+        Get overall feedback statistics across all users.
+
+        Args:
+            days: Number of days to analyze
+
+        Returns:
+            Dict with aggregated feedback statistics
+        """
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        # Count by feedback type
+        positive_count = (
+            self.session.query(func.count(Feedback.id))
+            .filter(
+                Feedback.feedback_type == "positive",
+                Feedback.timestamp >= cutoff,
+            )
+            .scalar()
+        )
+
+        negative_count = (
+            self.session.query(func.count(Feedback.id))
+            .filter(
+                Feedback.feedback_type == "negative",
+                Feedback.timestamp >= cutoff,
+            )
+            .scalar()
+        )
+
+        issue_action_count = (
+            self.session.query(func.count(Feedback.id))
+            .filter(
+                Feedback.feedback_type == "issue_action",
+                Feedback.timestamp >= cutoff,
+            )
+            .scalar()
+        )
+
+        # Count unique users
+        unique_users = (
+            self.session.query(func.count(func.distinct(Feedback.user_id)))
+            .filter(Feedback.timestamp >= cutoff)
+            .scalar()
+        )
+
+        total_count = (
+            (positive_count or 0) + (negative_count or 0) + (issue_action_count or 0)
+        )
+
+        return {
+            "positive_count": positive_count or 0,
+            "negative_count": negative_count or 0,
+            "issue_action_count": issue_action_count or 0,
+            "total_count": total_count,
+            "unique_users": unique_users or 0,
+            "satisfaction_rate": (
+                round((positive_count or 0) / total_count * 100, 1)
+                if total_count > 0
+                else 0.0
+            ),
         }
