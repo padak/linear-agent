@@ -39,6 +39,34 @@ class IssueVectorStore:
             logger.error(f"Failed to initialize IssueVectorStore: {e}", exc_info=True)
             raise
 
+    def _sanitize_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
+        """Sanitize metadata to only contain ChromaDB-compatible types.
+
+        ChromaDB only supports primitive types: str, int, float, bool.
+        This method converts list values to comma-separated strings.
+
+        Args:
+            metadata: Raw metadata dictionary.
+
+        Returns:
+            Sanitized metadata dictionary with only primitive types.
+        """
+        sanitized = {}
+        for key, value in metadata.items():
+            if isinstance(value, list):
+                # Convert list to comma-separated string
+                sanitized[key] = ",".join(str(item) for item in value)
+            elif isinstance(value, (str, int, float, bool)):
+                # Keep primitive types as-is
+                sanitized[key] = value
+            elif value is None:
+                # Convert None to empty string
+                sanitized[key] = ""
+            else:
+                # Convert other types to string
+                sanitized[key] = str(value)
+        return sanitized
+
     def _generate_embedding(self, text: str) -> list[float]:
         """Generate embedding for text using sentence-transformers.
 
@@ -81,6 +109,10 @@ class IssueVectorStore:
         # Default to a minimal metadata dict if none provided
         if not metadata:
             metadata = {"_placeholder": "true"}
+        else:
+            # ChromaDB only supports primitive types (str, int, float, bool)
+            # Convert list values to comma-separated strings
+            metadata = self._sanitize_metadata(metadata)
 
         # Combine title and description for embedding
         combined_text = f"{title}\n\n{description}"

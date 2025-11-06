@@ -33,11 +33,20 @@ from linear_chief.telegram.handlers import (
     help_handler,
     status_handler,
     briefing_handler,
+    duplicates_handler,
+    similar_handler,
+    related_handler,
     text_message_handler,
+)
+from linear_chief.telegram.handlers_preferences import (
+    preferences_handler,
+    prefer_handler,
+    ignore_handler,
 )
 from linear_chief.telegram.callbacks import (
     feedback_callback_handler,
     issue_action_callback_handler,
+    preferences_reset_callback,
 )
 from linear_chief.telegram.keyboards import get_briefing_feedback_keyboard
 
@@ -124,6 +133,24 @@ class TelegramApplication:
         self.application.add_handler(
             CommandHandler("briefing", briefing_handler),
         )
+        self.application.add_handler(
+            CommandHandler("duplicates", duplicates_handler),
+        )
+        self.application.add_handler(
+            CommandHandler("similar", similar_handler),
+        )
+        self.application.add_handler(
+            CommandHandler("related", related_handler),
+        )
+        self.application.add_handler(
+            CommandHandler("preferences", preferences_handler),
+        )
+        self.application.add_handler(
+            CommandHandler("prefer", prefer_handler),
+        )
+        self.application.add_handler(
+            CommandHandler("ignore", ignore_handler),
+        )
 
         # Callback query handlers (inline keyboard buttons)
         self.application.add_handler(
@@ -138,6 +165,12 @@ class TelegramApplication:
                 pattern="^issue_(done|unsub)_",
             )
         )
+        self.application.add_handler(
+            CallbackQueryHandler(
+                preferences_reset_callback,
+                pattern="^prefs_reset_",
+            )
+        )
 
         # Text message handler (must be last to avoid catching commands)
         self.application.add_handler(
@@ -150,8 +183,8 @@ class TelegramApplication:
         logger.info(
             "Registered handlers",
             extra={
-                "command_handlers": 4,
-                "callback_handlers": 2,
+                "command_handlers": 10,
+                "callback_handlers": 3,
                 "message_handlers": 1,
             },
         )

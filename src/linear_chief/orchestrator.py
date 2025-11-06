@@ -24,6 +24,8 @@ from linear_chief.config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
     TELEGRAM_MODE,
+    LINEAR_USER_EMAIL,
+    CONVERSATION_ENABLED,
 )
 
 logger = get_logger(__name__)
@@ -146,30 +148,72 @@ class BriefingOrchestrator:
                 if not issues:
                     logger.info("No issues to report")
                     result["success"] = True
-                    result["duration_seconds"] = (
-                        datetime.utcnow() - start_time
-                    ).total_seconds()
+                    result["duration_seconds"] = (datetime.utcnow() - start_time).total_seconds()
                     return result
 
-                # Step 2: Analyze issues
+                # Step 2: Analyze issues with optional preference-based ranking
                 logger.info("Step 2/8: Analyzing issues with intelligence layer")
-                analyzed_issues = []
-                for issue in issues:
-                    analysis = self.analyzer.analyze_issue(issue)
-                    # Attach analysis to issue for context
-                    issue["_analysis"] = {
-                        "priority": analysis.priority,
-                        "is_stagnant": analysis.is_stagnant,
-                        "is_blocked": analysis.is_blocked,
-                        "insights": analysis.insights,
-                    }
-                    analyzed_issues.append(issue)
 
-                # Sort by priority (descending)
-                analyzed_issues.sort(
-                    key=lambda x: x.get("_analysis", {}).get("priority", 0),
-                    reverse=True,
+                # Use preference-based ranking if user configured and enabled
+                use_preferences = (
+                    CONVERSATION_ENABLED and LINEAR_USER_EMAIL and LINEAR_USER_EMAIL.strip()
                 )
+
+                if use_preferences:
+                    logger.info(f"Using preference-based ranking for user {LINEAR_USER_EMAIL}")
+                    # Use personalized ranking
+                    analysis_results = await self.analyzer.analyze_with_preferences(
+                        issues=issues,
+                        user_id=LINEAR_USER_EMAIL,
+                    )
+
+                    # Convert AnalysisResult objects back to issue dicts with analysis
+                    analyzed_issues = []
+                    for i, analysis in enumerate(analysis_results):
+                        # Find matching issue
+                        matching_issue = None
+                        issue_id = getattr(analysis, "issue_id", "")
+                        for issue in issues:
+                            if issue.get("identifier") == issue_id:
+                                matching_issue = issue
+                                break
+
+                        if matching_issue:
+                            # Attach analysis to issue for context
+                            matching_issue["_analysis"] = {
+                                "priority": analysis.priority,
+                                "personalized_priority": getattr(
+                                    analysis, "personalized_priority", analysis.priority
+                                ),
+                                "is_stagnant": analysis.is_stagnant,
+                                "is_blocked": analysis.is_blocked,
+                                "insights": analysis.insights,
+                            }
+                            analyzed_issues.append(matching_issue)
+                        else:
+                            logger.warning(f"Could not find matching issue for {issue_id}")
+
+                    # Already sorted by personalized priority in analyze_with_preferences
+                else:
+                    logger.info("Using standard priority ranking")
+                    # Use standard analysis
+                    analyzed_issues = []
+                    for issue in issues:
+                        analysis = self.analyzer.analyze_issue(issue)
+                        # Attach analysis to issue for context
+                        issue["_analysis"] = {
+                            "priority": analysis.priority,
+                            "is_stagnant": analysis.is_stagnant,
+                            "is_blocked": analysis.is_blocked,
+                            "insights": analysis.insights,
+                        }
+                        analyzed_issues.append(issue)
+
+                    # Sort by priority (descending)
+                    analyzed_issues.sort(
+                        key=lambda x: x.get("_analysis", {}).get("priority", 0),
+                        reverse=True,
+                    )
 
                 # Step 3: Save issue snapshots to database
                 logger.info("Step 3/8: Saving issue snapshots to database")
@@ -193,14 +237,10 @@ class BriefingOrchestrator:
                                 else None
                             ),
                             team_id=(
-                                issue.get("team", {}).get("id")
-                                if issue.get("team")
-                                else None
+                                issue.get("team", {}).get("id") if issue.get("team") else None
                             ),
                             team_name=(
-                                issue.get("team", {}).get("name")
-                                if issue.get("team")
-                                else None
+                                issue.get("team", {}).get("name") if issue.get("team") else None
                             ),
                             labels=[
                                 label.get("name", "")
@@ -233,9 +273,7 @@ class BriefingOrchestrator:
                     for item in memory_context:
                         if "memory" in item:
                             context_parts.append(item["memory"])
-                    agent_context_str = (
-                        "\n\n".join(context_parts) if context_parts else None
-                    )
+                    agent_context_str = "\n\n".join(context_parts) if context_parts else None
 
                 # Step 6: Generate briefing via Agent SDK
                 logger.info("Step 6/8: Generating briefing via Agent SDK")
@@ -256,9 +294,7 @@ class BriefingOrchestrator:
 
                 # Note: briefing_id not available yet - will be created in Step 8
                 # For interactive mode, we'll update the briefing record after creation
-                telegram_success = await self.telegram_bot.send_briefing(
-                    briefing_content
-                )
+                telegram_success = await self.telegram_bot.send_briefing(briefing_content)
 
                 # Step 8: Archive briefing and metrics to database
                 logger.info("Step 8/8: Archiving briefing and metrics to database")
@@ -271,9 +307,7 @@ class BriefingOrchestrator:
                         content=briefing_content,
                         issue_count=len(issues),
                         agent_context=(
-                            {"context": agent_context_str}
-                            if agent_context_str
-                            else None
+                            {"context": agent_context_str} if agent_context_str else None
                         ),
                         cost_usd=cost_usd,
                         input_tokens=input_tokens,
@@ -296,9 +330,7 @@ class BriefingOrchestrator:
                         # Cast Column[int] to int for type checker
                         briefing_repo.mark_as_sent(int(briefing.id))
                     else:
-                        briefing_repo.mark_as_failed(
-                            int(briefing.id), "Telegram delivery failed"
-                        )
+                        briefing_repo.mark_as_failed(int(briefing.id), "Telegram delivery failed")
 
                     # Record metrics
                     metrics_repo.record_metric(
@@ -336,9 +368,7 @@ class BriefingOrchestrator:
 
                 # Success!
                 result["success"] = True
-                result["duration_seconds"] = (
-                    datetime.utcnow() - start_time
-                ).total_seconds()
+                result["duration_seconds"] = (datetime.utcnow() - start_time).total_seconds()
 
                 logger.info(
                     f"Briefing workflow completed successfully. "
@@ -390,9 +420,7 @@ class BriefingOrchestrator:
         # Test Telegram connection
         try:
             results["telegram"] = await self.telegram_bot.test_connection()
-            logger.info(
-                f"Telegram connection: {'OK' if results['telegram'] else 'FAILED'}"
-            )
+            logger.info(f"Telegram connection: {'OK' if results['telegram'] else 'FAILED'}")
         except Exception as e:
             logger.error(f"Telegram connection failed: {e}")
             results["telegram"] = False

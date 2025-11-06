@@ -14,6 +14,8 @@ from linear_chief.storage.models import (
     Metrics,
     Conversation,
     Feedback,
+    IssueEngagement,
+    UserPreference,
 )
 from linear_chief.storage.repositories import (
     IssueHistoryRepository,
@@ -21,6 +23,8 @@ from linear_chief.storage.repositories import (
     MetricsRepository,
     ConversationRepository,
     FeedbackRepository,
+    IssueEngagementRepository,
+    UserPreferenceRepository,
 )
 
 __all__ = [
@@ -35,9 +39,13 @@ __all__ = [
     "Metrics",
     "Conversation",
     "Feedback",
+    "IssueEngagement",
+    "UserPreference",
     "IssueHistoryRepository",
     "BriefingRepository",
     "MetricsRepository",
     "ConversationRepository",
     "FeedbackRepository",
+    "IssueEngagementRepository",
+    "UserPreferenceRepository",
 ]

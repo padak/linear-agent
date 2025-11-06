@@ -118,14 +118,29 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "• /help - Show this help message\n"
             "• /status - View current briefing status and statistics\n"
             "• /briefing - Get the latest briefing\n\n"
+            "*Search & Discovery:*\n"
+            "• /similar AI-1799 - Find similar issues\n"
+            "• /related AI-1799 - Get related issues\n"
+            "• /duplicates - Scan for duplicate issues\n"
+            "• /duplicates AI-1799 - Check specific issue\n"
+            "• /duplicates --all - Include done/canceled issues\n\n"
+            "*Preferences:*\n"
+            "• /preferences - View learned preferences\n"
+            "• /preferences topics/teams/labels/stats - View specific category\n"
+            "• /prefer <topic> - Manually prefer topic/team/label\n"
+            "• /ignore <topic> - Manually ignore topic/team/label\n"
+            "• /preferences reset - Reset all preferences\n\n"
             "*Ask Questions:*\n"
             "You can also ask me questions in natural language:\n"
             '• "Show me today\'s briefing"\n'
             '• "What blocked issues do I have?"\n'
             '• "Summarize the last briefing"\n'
-            '• "What\'s my priority for today?"\n\n'
+            '• "What\'s my priority for today?"\n'
+            '• "Search for authentication issues"\n'
+            '• "Find issues about performance"\n\n'
             f"*Daily Briefings:*\n"
-            f"I automatically send daily briefings at {BRIEFING_TIME} ({LOCAL_TIMEZONE}).\n\n"
+            f"I automatically send daily briefings at {BRIEFING_TIME} ({LOCAL_TIMEZONE}).\n"
+            f"Briefings include automatic duplicate detection warnings.\n\n"
             "*Feedback:*\n"
             "Use 👍/👎 buttons on briefings to help me improve!"
         )
@@ -248,6 +263,40 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             status_message += "*Issue Breakdown:*\n"
             for state, count in sorted(state_counts.items(), key=lambda x: -x[1]):
                 status_message += f"• {state}: {count}\n"
+
+        # Add preference summary if available
+        from linear_chief.config import LINEAR_USER_EMAIL
+
+        if LINEAR_USER_EMAIL:
+            from linear_chief.storage.repositories import UserPreferenceRepository
+
+            try:
+                for session in get_db_session(session_maker):
+                    pref_repo = UserPreferenceRepository(session)
+                    prefs = pref_repo.get_all_preferences(LINEAR_USER_EMAIL)
+
+                    if prefs:
+                        # Count preferences by type
+                        topic_count = sum(1 for p in prefs if p.preference_type == "topic")
+                        team_count = sum(1 for p in prefs if p.preference_type == "team")
+                        label_count = sum(1 for p in prefs if p.preference_type == "label")
+
+                        # Get top preference
+                        top_pref = max(prefs, key=lambda p: p.score)
+                        confidence = top_pref.confidence if prefs else 0.0
+
+                        status_message += "\n**🎯 Preference Learning:**\n"
+                        status_message += f"• Topics: {topic_count}, Teams: {team_count}, Labels: {label_count}\n"
+                        status_message += f"• Confidence: {confidence:.0%}\n"
+
+                        if top_pref:
+                            status_message += (
+                                f"• Top: {top_pref.preference_key} "
+                                f"({top_pref.preference_type}) {top_pref.score:.0%}\n"
+                            )
+            except Exception:
+                # Non-fatal: Just skip preferences if error
+                pass
 
         status_message += "\n_Use /help to see available commands_"
 
@@ -394,6 +443,154 @@ async def briefing_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         raise
 
 
+async def similar_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle /similar command - Find issues similar to a given issue.
+
+    Usage:
+        /similar AI-1799
+        /similar DMD-480 --limit 10
+
+    Args:
+        update: Telegram update object containing message info
+        context: Telegram context for bot state and API calls
+
+    Raises:
+        Exception: If message sending fails (logged and re-raised)
+    """
+    try:
+        if not update.effective_chat:
+            logger.warning("Received /similar command without effective_chat")
+            return
+
+        # Parse command arguments
+        args = context.args or []
+        if not args:
+            await update.effective_chat.send_message(
+                text="**Usage:** `/similar <issue-id> [--limit N]`\n\n"
+                "**Example:** `/similar AI-1799`\n\n"
+                "Find issues similar to the specified issue based on title and description.",
+                parse_mode="Markdown",
+            )
+            logger.info("Sent /similar usage message")
+            return
+
+        issue_id = args[0].upper()
+        limit = 5
+
+        # Parse optional --limit flag
+        if "--limit" in args:
+            try:
+                limit_idx = args.index("--limit")
+                if limit_idx + 1 < len(args):
+                    limit = int(args[limit_idx + 1])
+                    # Clamp to reasonable range
+                    limit = max(1, min(limit, 20))
+            except (ValueError, IndexError):
+                pass
+
+        logger.info(
+            "Processing /similar command",
+            extra={
+                "chat_id": update.effective_chat.id,
+                "user_id": update.effective_user.id if update.effective_user else None,
+                "issue_id": issue_id,
+                "limit": limit,
+            },
+        )
+
+        # Send "typing" action while processing
+        await update.effective_chat.send_action(action="typing")
+
+        # Search for similar issues
+        from linear_chief.intelligence.semantic_search import SemanticSearchService
+
+        search_service = SemanticSearchService()
+
+        try:
+            results = await search_service.find_similar_issues(
+                issue_id=issue_id,
+                limit=limit,
+                min_similarity=0.5,
+            )
+
+            if not results:
+                await update.effective_chat.send_message(
+                    text=f"No similar issues found for **{issue_id}**.\n\n"
+                    f"This could mean:\n"
+                    f"• Issue not in our database yet\n"
+                    f"• No other issues are similar enough (>50%)\n"
+                    f"• Issue doesn't exist",
+                    parse_mode="Markdown",
+                )
+                logger.info(
+                    f"No similar issues found for {issue_id}",
+                    extra={"issue_id": issue_id},
+                )
+                return
+
+            # Format results
+            formatted = search_service.format_similarity_results(results)
+
+            await update.effective_chat.send_message(
+                text=f"**Similar to {issue_id}:**\n\n{formatted}",
+                parse_mode="Markdown",
+                disable_web_page_preview=True,
+            )
+
+            logger.info(
+                f"Returned {len(results)} similar issues for {issue_id}",
+                extra={
+                    "chat_id": update.effective_chat.id,
+                    "issue_id": issue_id,
+                    "results_count": len(results),
+                },
+            )
+
+        except ValueError as e:
+            # Issue not found
+            await update.effective_chat.send_message(
+                text=f"⚠️ {str(e)}",
+                parse_mode="Markdown",
+            )
+            logger.warning(f"Issue not found: {issue_id}", extra={"issue_id": issue_id})
+
+        except Exception as e:
+            logger.error(
+                "Error in similar_handler",
+                extra={
+                    "chat_id": update.effective_chat.id,
+                    "issue_id": issue_id,
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
+            )
+            await update.effective_chat.send_message(
+                text=f"⚠️ Error finding similar issues: {str(e)}",
+                parse_mode="Markdown",
+            )
+
+    except Exception as e:
+        logger.error(
+            "Failed to handle /similar command",
+            extra={
+                "chat_id": update.effective_chat.id if update.effective_chat else None,
+                "error_type": type(e).__name__,
+            },
+            exc_info=True,
+        )
+        # Try to send error message to user
+        if update.effective_chat:
+            try:
+                await update.effective_chat.send_message(
+                    text="⚠️ Sorry, I encountered an error processing your request. "
+                    "Please try again later.",
+                )
+            except Exception:
+                pass  # Silently fail if error message can't be sent
+        raise
+
+
 async def text_message_handler(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -404,6 +601,8 @@ async def text_message_handler(
     - User's question
     - Conversation history
     - Recent issues and briefings context
+
+    Also detects and handles natural language search queries for semantic search.
 
     Args:
         update: Telegram update object containing message info
@@ -445,8 +644,122 @@ async def text_message_handler(
             },
         )
 
+        # Check if user is asking for semantic search
+        import re
+
+        search_patterns = [
+            r"najdi\s+issues?\s+(?:o|about)\s+(.+)",
+            r"hledám\s+(.+)",
+            r"search\s+(?:for\s+)?(.+)",
+            r"show\s+me\s+issues?\s+(?:about|related to)\s+(.+)",
+            r"find\s+issues?\s+(?:about|related to)\s+(.+)",
+        ]
+
+        for pattern in search_patterns:
+            match = re.search(pattern, user_message, re.IGNORECASE)
+            if match:
+                query = match.group(1).strip()
+
+                logger.info(
+                    "Detected natural language search query",
+                    extra={
+                        "chat_id": chat_id,
+                        "user_id": user_id,
+                        "query": query,
+                    },
+                )
+
+                # Send "typing" action while processing
+                await update.effective_chat.send_action(action="typing")
+
+                # Perform semantic search
+                from linear_chief.intelligence.semantic_search import (
+                    SemanticSearchService,
+                )
+
+                search_service = SemanticSearchService()
+
+                try:
+                    results = await search_service.search_by_text(
+                        query=query,
+                        limit=5,
+                        min_similarity=0.4,
+                    )
+
+                    if results:
+                        formatted = search_service.format_similarity_results(results)
+                        await update.effective_chat.send_message(
+                            text=f"**Search results for '{query}':**\n\n{formatted}",
+                            parse_mode="Markdown",
+                            disable_web_page_preview=True,
+                        )
+
+                        logger.info(
+                            f"Returned {len(results)} search results",
+                            extra={
+                                "chat_id": chat_id,
+                                "query": query,
+                                "results_count": len(results),
+                            },
+                        )
+                    else:
+                        await update.effective_chat.send_message(
+                            text=f"No issues found matching '{query}'.\n\n"
+                            f"Try using different keywords or a broader search.",
+                            parse_mode="Markdown",
+                        )
+
+                        logger.info(
+                            f"No search results found for query",
+                            extra={"chat_id": chat_id, "query": query},
+                        )
+
+                    return  # Don't continue to Claude API
+
+                except Exception as e:
+                    logger.error(
+                        "Error in natural language search",
+                        extra={
+                            "chat_id": chat_id,
+                            "query": query,
+                            "error_type": type(e).__name__,
+                        },
+                        exc_info=True,
+                    )
+                    # Continue to Claude API as fallback
+
         # Send "typing" action while processing
         await update.effective_chat.send_action(action="typing")
+
+        # Track engagement: Extract issue IDs from user message
+        from linear_chief.agent.context_builder import extract_issue_ids
+        from linear_chief.intelligence.engagement_tracker import EngagementTracker
+
+        issue_ids = extract_issue_ids(user_message)
+        if issue_ids:
+            tracker = EngagementTracker()
+            for issue_id in issue_ids:
+                try:
+                    await tracker.track_issue_mention(
+                        user_id=user_id,
+                        issue_id=issue_id,
+                        interaction_type="query",
+                        context=user_message[:200],  # Store first 200 chars
+                    )
+                    logger.info(f"Tracked engagement: {user_id} queried {issue_id}")
+                except Exception as e:
+                    # Non-fatal: Log but don't fail the query
+                    logger.warning(
+                        f"Failed to track engagement for {issue_id}",
+                        extra={"error_type": type(e).__name__},
+                    )
+
+        # Check if we should suggest related issues
+        should_suggest = False
+        if issue_ids:
+            from linear_chief.intelligence.related_suggester import should_suggest_related
+
+            should_suggest = should_suggest_related(user_message, issue_ids)
 
         # Get database session
         session_maker = get_session_maker()
@@ -553,10 +866,42 @@ async def text_message_handler(
             if len(response_text) > 4000:
                 response_text = response_text[:3997] + "..."
 
+            # Add related issues suggestions if applicable
+            if should_suggest and len(issue_ids) == 1:
+                try:
+                    from linear_chief.intelligence.related_suggester import (
+                        RelatedIssuesSuggester,
+                    )
+
+                    suggester = RelatedIssuesSuggester()
+                    related = await suggester.get_related_issues(
+                        issue_id=issue_ids[0],
+                        limit=3,
+                        min_similarity=0.6,
+                        exclude_duplicates=True,
+                    )
+
+                    if related:
+                        # Append related issues to response
+                        formatted_related = suggester.format_related_issues(related)
+                        response_text += f"\n\n{formatted_related}"
+
+                        logger.info(
+                            f"Added {len(related)} related issues to response for {issue_ids[0]}"
+                        )
+
+                except Exception as e:
+                    # Non-fatal: Log but don't fail the response
+                    logger.warning(
+                        "Failed to add related issues to response",
+                        extra={"error_type": type(e).__name__},
+                    )
+
             # Send response
             await update.effective_chat.send_message(
                 text=response_text,
                 parse_mode="Markdown",
+                disable_web_page_preview=True,
             )
 
             # Save assistant response to database
@@ -621,6 +966,400 @@ async def text_message_handler(
             except Exception:
                 pass  # Silently fail if error message can't be sent
         raise
+
+
+async def related_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle /related command - Show related issues for a specific issue.
+
+    Shows related issues based on semantic similarity to the specified issue.
+
+    Usage:
+        /related AI-1799
+        /related DMD-480 --limit 5
+
+    Args:
+        update: Telegram update object containing message info
+        context: Telegram context for bot state and API calls
+
+    Raises:
+        Exception: If message sending fails (logged and re-raised)
+    """
+    try:
+        if not update.effective_chat:
+            logger.warning("Received /related command without effective_chat")
+            return
+
+        # Parse command arguments
+        args = context.args or []
+        if not args:
+            await update.effective_chat.send_message(
+                text="**Usage:** `/related <issue-id> [--limit N]`\n\n"
+                "**Example:** `/related AI-1799`\n\n"
+                "Find issues related to the specified issue based on semantic similarity.",
+                parse_mode="Markdown",
+            )
+            logger.info("Sent /related usage message")
+            return
+
+        issue_id = args[0].upper()
+        limit = 5
+
+        # Parse optional --limit flag
+        if "--limit" in args:
+            try:
+                limit_idx = args.index("--limit")
+                if limit_idx + 1 < len(args):
+                    limit = int(args[limit_idx + 1])
+                    # Clamp to reasonable range
+                    limit = max(1, min(limit, 20))
+            except (ValueError, IndexError):
+                pass
+
+        logger.info(
+            "Processing /related command",
+            extra={
+                "chat_id": update.effective_chat.id,
+                "user_id": update.effective_user.id if update.effective_user else None,
+                "issue_id": issue_id,
+                "limit": limit,
+            },
+        )
+
+        # Send "typing" action while processing
+        await update.effective_chat.send_action(action="typing")
+
+        # Get related issues
+        from linear_chief.intelligence.related_suggester import RelatedIssuesSuggester
+
+        suggester = RelatedIssuesSuggester()
+
+        try:
+            related = await suggester.get_related_issues(
+                issue_id=issue_id,
+                limit=limit,
+                min_similarity=0.5,  # Lower threshold for more results
+                exclude_duplicates=False,  # Show all related (user explicitly asked)
+            )
+
+            if not related:
+                await update.effective_chat.send_message(
+                    text=f"No related issues found for **{issue_id}**.\n\n"
+                    f"This could mean:\n"
+                    f"• Issue not in our database yet\n"
+                    f"• No other issues are similar enough (>50%)\n"
+                    f"• Issue doesn't exist",
+                    parse_mode="Markdown",
+                )
+                logger.info(
+                    f"No related issues found for {issue_id}",
+                    extra={"issue_id": issue_id},
+                )
+                return
+
+            # Format results with similarity scores
+            formatted = suggester.format_related_issues(related, show_similarity=True)
+
+            await update.effective_chat.send_message(
+                text=f"**Related to {issue_id}:**\n\n{formatted}",
+                parse_mode="Markdown",
+                disable_web_page_preview=True,
+            )
+
+            logger.info(
+                f"Returned {len(related)} related issues for {issue_id}",
+                extra={
+                    "chat_id": update.effective_chat.id,
+                    "issue_id": issue_id,
+                    "results_count": len(related),
+                },
+            )
+
+        except ValueError as e:
+            # Issue not found
+            await update.effective_chat.send_message(
+                text=f"⚠️ {str(e)}",
+                parse_mode="Markdown",
+            )
+            logger.warning(f"Issue not found: {issue_id}", extra={"issue_id": issue_id})
+
+        except Exception as e:
+            logger.error(
+                "Error in related_handler",
+                extra={
+                    "chat_id": update.effective_chat.id,
+                    "issue_id": issue_id,
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
+            )
+            await update.effective_chat.send_message(
+                text=f"⚠️ Error finding related issues: {str(e)}",
+                parse_mode="Markdown",
+            )
+
+    except Exception as e:
+        logger.error(
+            "Failed to handle /related command",
+            extra={
+                "chat_id": update.effective_chat.id if update.effective_chat else None,
+                "error_type": type(e).__name__,
+            },
+            exc_info=True,
+        )
+        # Try to send error message to user
+        if update.effective_chat:
+            try:
+                await update.effective_chat.send_message(
+                    text="⚠️ Sorry, I encountered an error processing your request. "
+                    "Please try again later.",
+                )
+            except Exception:
+                pass  # Silently fail if error message can't be sent
+        raise
+
+
+async def duplicates_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle /duplicates command - Detect potential duplicate issues.
+
+    Shows potential duplicate issues in the system using vector similarity.
+    Supports checking all issues or a specific issue.
+
+    Usage:
+        /duplicates - Scan all active issues for duplicates
+        /duplicates --all - Include Done/Canceled issues
+        /duplicates AI-1799 - Check specific issue for duplicates
+
+    Args:
+        update: Telegram update object containing message info
+        context: Telegram context for bot state and API calls
+
+    Raises:
+        Exception: If duplicate detection or message sending fails (logged and re-raised)
+    """
+    try:
+        if not update.effective_chat:
+            logger.warning("Received /duplicates command without effective_chat")
+            return
+
+        logger.info(
+            "Handling /duplicates command",
+            extra={
+                "chat_id": update.effective_chat.id,
+                "user_id": update.effective_user.id if update.effective_user else None,
+            },
+        )
+
+        # Send "typing" action while processing
+        await update.effective_chat.send_action(action="typing")
+
+        # Import duplicate detector
+        from linear_chief.intelligence.duplicate_detector import DuplicateDetector
+
+        detector = DuplicateDetector()
+        args = context.args or []
+
+        # Check if user wants to check specific issue
+        if args and not args[0].startswith("--"):
+            issue_id = args[0].upper()
+
+            try:
+                duplicates = await detector.check_issue_for_duplicates(
+                    issue_id, min_similarity=0.85
+                )
+
+                if not duplicates:
+                    await update.effective_chat.send_message(
+                        text=f"No duplicates found for {issue_id}.\n\n"
+                        f"Check mark This issue appears to be unique!",
+                        parse_mode="Markdown",
+                    )
+                    logger.info(
+                        f"No duplicates found for {issue_id}",
+                        extra={"chat_id": update.effective_chat.id},
+                    )
+                    return
+
+                # Format results
+                formatted = detector.format_duplicate_report(duplicates)
+
+                # Replace emoji placeholders with actual emojis
+                formatted = formatted.replace("Warning", "\u26A0\uFE0F")
+                formatted = formatted.replace("Double-arrows", "\u2194\uFE0F")
+                formatted = formatted.replace("Bullet", "\u2022")
+                formatted = formatted.replace("Right-arrow", "\u27A1\uFE0F")
+                formatted = formatted.replace("Check mark", "\u2705")
+
+                await update.effective_chat.send_message(
+                    text=f"**Duplicates for {issue_id}:**\n\n{formatted}",
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True,
+                )
+
+                logger.info(
+                    f"Found {len(duplicates)} duplicates for {issue_id}",
+                    extra={
+                        "chat_id": update.effective_chat.id,
+                        "issue_id": issue_id,
+                        "duplicate_count": len(duplicates),
+                    },
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Error checking duplicates for {issue_id}",
+                    extra={
+                        "chat_id": update.effective_chat.id,
+                        "issue_id": issue_id,
+                        "error_type": type(e).__name__,
+                    },
+                    exc_info=True,
+                )
+                await update.effective_chat.send_message(
+                    text=f"Error checking duplicates: {str(e)}",
+                    parse_mode="Markdown",
+                )
+            return
+
+        # General duplicate scan
+        active_only = "--all" not in args
+
+        try:
+            duplicates = await detector.find_duplicates(
+                min_similarity=0.85,
+                active_only=active_only,
+            )
+
+            if not duplicates:
+                await update.effective_chat.send_message(
+                    text="Check mark **No duplicates detected!**\n\n"
+                    "All issues appear to be unique.",
+                    parse_mode="Markdown",
+                )
+                logger.info(
+                    "No duplicates found in scan",
+                    extra={
+                        "chat_id": update.effective_chat.id,
+                        "active_only": active_only,
+                    },
+                )
+                return
+
+            # Format report
+            formatted = detector.format_duplicate_report(duplicates)
+
+            # Replace emoji placeholders with actual emojis
+            formatted = formatted.replace("Warning", "\u26A0\uFE0F")
+            formatted = formatted.replace("Double-arrows", "\u2194\uFE0F")
+            formatted = formatted.replace("Bullet", "\u2022")
+            formatted = formatted.replace("Right-arrow", "\u27A1\uFE0F")
+            formatted = formatted.replace("Check mark", "\u2705")
+
+            # Split message if too long (Telegram limit: 4096 chars)
+            if len(formatted) > 4000:
+                # Send in chunks
+                chunks = _split_long_message(formatted, max_length=4000)
+                for chunk in chunks:
+                    await update.effective_chat.send_message(
+                        text=chunk,
+                        parse_mode="Markdown",
+                        disable_web_page_preview=True,
+                    )
+                    # Small delay to avoid rate limiting
+                    import asyncio
+
+                    await asyncio.sleep(0.1)
+            else:
+                await update.effective_chat.send_message(
+                    text=formatted,
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True,
+                )
+
+            logger.info(
+                f"Found {len(duplicates)} potential duplicate pairs",
+                extra={
+                    "chat_id": update.effective_chat.id,
+                    "duplicate_count": len(duplicates),
+                    "active_only": active_only,
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "Error in duplicates_handler",
+                extra={
+                    "chat_id": update.effective_chat.id,
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
+            )
+            await update.effective_chat.send_message(
+                text=f"Error detecting duplicates: {str(e)}",
+                parse_mode="Markdown",
+            )
+
+    except Exception as e:
+        logger.error(
+            "Failed to handle /duplicates command",
+            extra={
+                "chat_id": update.effective_chat.id if update.effective_chat else None,
+                "error_type": type(e).__name__,
+            },
+            exc_info=True,
+        )
+        # Try to send error message to user
+        if update.effective_chat:
+            try:
+                await update.effective_chat.send_message(
+                    text="Warning Sorry, I encountered an error detecting duplicates. "
+                    "Please try again later.",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass  # Silently fail if error message can't be sent
+        raise
+
+
+def _split_long_message(message: str, max_length: int = 4000) -> list[str]:
+    """
+    Split long message into chunks for Telegram.
+
+    Args:
+        message: Message text to split
+        max_length: Maximum characters per chunk
+
+    Returns:
+        List of message chunks
+    """
+    if len(message) <= max_length:
+        return [message]
+
+    chunks = []
+    remaining = message
+
+    while remaining:
+        if len(remaining) <= max_length:
+            chunks.append(remaining)
+            break
+
+        # Try to split at paragraph boundary
+        chunk = remaining[:max_length]
+        split_idx = chunk.rfind("\n\n")
+
+        if split_idx == -1:
+            # Try to split at line boundary
+            split_idx = chunk.rfind("\n")
+
+        if split_idx == -1:
+            # Hard cut
+            split_idx = max_length
+
+        chunks.append(remaining[:split_idx].strip())
+        remaining = remaining[split_idx:].strip()
+
+    return chunks
 
 
 def _format_time_ago(timestamp: datetime) -> str:

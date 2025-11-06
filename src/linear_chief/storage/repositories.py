@@ -1,5 +1,6 @@
 """Repository pattern implementations for data access."""
 
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
@@ -12,6 +13,8 @@ from linear_chief.storage.models import (
     Metrics,
     Conversation,
     Feedback,
+    IssueEngagement,
+    UserPreference,
 )
 
 logger = logging.getLogger(__name__)
@@ -724,6 +727,32 @@ class FeedbackRepository:
         logger.debug(f"Saved {feedback_type} feedback from user {user_id}")
         return feedback
 
+    def record_feedback(
+        self,
+        user_id: str,
+        briefing_id: Optional[int],
+        feedback_type: str,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Feedback:
+        """
+        Record user feedback on briefings or issue actions.
+
+        Alias for save_feedback() to support both naming conventions.
+
+        Args:
+            user_id: Telegram user ID
+            briefing_id: Briefing ID (optional, can be None for issue actions)
+            feedback_type: Type of feedback ('positive', 'negative', 'issue_action')
+            extra_metadata: Additional context (telegram_message_id, action details, etc.)
+
+        Returns:
+            Created Feedback instance
+
+        Raises:
+            ValueError: If feedback_type is invalid
+        """
+        return self.save_feedback(user_id, briefing_id, feedback_type, extra_metadata)
+
     def get_user_feedback_stats(self, user_id: str, days: int = 30) -> Dict[str, Any]:
         """
         Get feedback statistics for a specific user.
@@ -888,4 +917,581 @@ class FeedbackRepository:
                 if total_count > 0
                 else 0.0
             ),
+        }
+
+
+class IssueEngagementRepository:
+    """Repository for IssueEngagement model operations."""
+
+    def __init__(self, session: Session):
+        """
+        Initialize repository with database session.
+
+        Args:
+            session: SQLAlchemy session
+        """
+        self.session = session
+
+    def record_interaction(
+        self,
+        user_id: str,
+        issue_id: str,
+        linear_id: str,
+        interaction_type: str = "mention",
+        context: Optional[str] = None,
+    ) -> IssueEngagement:
+        """
+        Record user interaction with issue (upsert pattern).
+
+        If record exists: increments interaction_count and updates last_interaction.
+        If record doesn't exist: creates new record.
+
+        Args:
+            user_id: Telegram user ID
+            issue_id: Issue identifier (e.g., "AI-1799")
+            linear_id: Linear UUID
+            interaction_type: Type of interaction ("query", "view", "mention")
+            context: User's message or context (optional)
+
+        Returns:
+            Created or updated IssueEngagement instance
+
+        Raises:
+            ValueError: If interaction_type is invalid
+        """
+        valid_types = ("query", "view", "mention")
+        if interaction_type not in valid_types:
+            raise ValueError(
+                f"Invalid interaction_type: {interaction_type}. "
+                f"Must be one of {valid_types}"
+            )
+
+        # Check if record exists (user_id + issue_id unique constraint)
+        engagement = (
+            self.session.query(IssueEngagement)
+            .filter(
+                IssueEngagement.user_id == user_id,
+                IssueEngagement.issue_id == issue_id,
+            )
+            .first()
+        )
+
+        if engagement:
+            # Update existing record
+            # SQLAlchemy ORM: Column assignments at runtime work despite type hints
+            engagement.interaction_count += 1  # type: ignore[attr-defined]
+            engagement.last_interaction = datetime.utcnow()  # type: ignore[assignment]
+            engagement.interaction_type = interaction_type  # type: ignore[assignment]
+            if context:
+                engagement.context = context  # type: ignore[assignment]
+
+            logger.debug(
+                f"Updated engagement for {user_id} on {issue_id} "
+                f"(count: {engagement.interaction_count})"  # type: ignore[attr-defined]
+            )
+        else:
+            # Create new record
+            engagement = IssueEngagement(
+                user_id=user_id,
+                issue_id=issue_id,
+                linear_id=linear_id,
+                interaction_type=interaction_type,
+                interaction_count=1,
+                engagement_score=0.5,  # Default score
+                context=context,
+            )
+            self.session.add(engagement)
+            logger.debug(f"Created new engagement for {user_id} on {issue_id}")
+
+        self.session.commit()
+        self.session.refresh(engagement)
+
+        return engagement
+
+    def get_engagement(self, user_id: str, issue_id: str) -> Optional[IssueEngagement]:
+        """
+        Get engagement record for specific issue.
+
+        Args:
+            user_id: Telegram user ID
+            issue_id: Issue identifier
+
+        Returns:
+            IssueEngagement instance or None if not found
+        """
+        return (
+            self.session.query(IssueEngagement)
+            .filter(
+                IssueEngagement.user_id == user_id,
+                IssueEngagement.issue_id == issue_id,
+            )
+            .first()
+        )
+
+    def get_all_engagements(
+        self, user_id: str, min_score: float = 0.0
+    ) -> List[IssueEngagement]:
+        """
+        Get all engagement records for user.
+
+        Args:
+            user_id: Telegram user ID
+            min_score: Minimum engagement score to filter (default: 0.0)
+
+        Returns:
+            List of IssueEngagement instances
+        """
+        return (
+            self.session.query(IssueEngagement)
+            .filter(
+                IssueEngagement.user_id == user_id,
+                IssueEngagement.engagement_score >= min_score,
+            )
+            .order_by(desc(IssueEngagement.engagement_score))
+            .all()
+        )
+
+    def get_top_engaged(self, user_id: str, limit: int = 10) -> List[IssueEngagement]:
+        """
+        Get top engaged issues sorted by engagement score.
+
+        Args:
+            user_id: Telegram user ID
+            limit: Maximum number of issues to return
+
+        Returns:
+            List of IssueEngagement instances, sorted by score descending
+        """
+        return (
+            self.session.query(IssueEngagement)
+            .filter(IssueEngagement.user_id == user_id)
+            .order_by(desc(IssueEngagement.engagement_score))
+            .limit(limit)
+            .all()
+        )
+
+    def get_top_engaged_issues(self, user_id: str, limit: int = 10) -> List[IssueEngagement]:
+        """
+        Get top engaged issues sorted by engagement score.
+
+        Alias for get_top_engaged() for backwards compatibility.
+
+        Args:
+            user_id: Telegram user ID
+            limit: Maximum number of issues to return
+
+        Returns:
+            List of IssueEngagement instances, sorted by score descending
+        """
+        return self.get_top_engaged(user_id, limit)
+
+    def update_score(self, user_id: str, issue_id: str, new_score: float) -> None:
+        """
+        Update engagement score for issue.
+
+        Args:
+            user_id: Telegram user ID
+            issue_id: Issue identifier
+            new_score: New engagement score (0.0 to 1.0)
+
+        Raises:
+            ValueError: If new_score is outside [0.0, 1.0] range
+        """
+        if not (0.0 <= new_score <= 1.0):
+            raise ValueError(f"Score must be between 0.0 and 1.0, got {new_score}")
+
+        engagement = self.get_engagement(user_id, issue_id)
+        if engagement:
+            # SQLAlchemy ORM: Column assignments at runtime work despite type hints
+            engagement.engagement_score = new_score  # type: ignore[assignment]
+            self.session.commit()
+            logger.debug(f"Updated score for {user_id} on {issue_id}: {new_score:.2f}")
+        else:
+            logger.warning(
+                f"Cannot update score: No engagement found for {user_id} on {issue_id}"
+            )
+
+    def decay_old_engagements(
+        self, user_id: str, days_threshold: int = 30, decay_factor: float = 0.1
+    ) -> int:
+        """
+        Apply decay to old engagement scores.
+
+        Reduces scores for interactions older than days_threshold.
+        This ensures engagement reflects recent user interest.
+
+        Args:
+            user_id: Telegram user ID
+            days_threshold: Age threshold in days
+            decay_factor: Factor to reduce score by (0.1 = 10% reduction)
+
+        Returns:
+            Number of engagement records decayed
+
+        Raises:
+            ValueError: If decay_factor is outside [0.0, 1.0] range
+        """
+        if not (0.0 <= decay_factor <= 1.0):
+            raise ValueError(
+                f"Decay factor must be between 0.0 and 1.0, got {decay_factor}"
+            )
+
+        cutoff = datetime.utcnow() - timedelta(days=days_threshold)
+
+        # Find old engagements
+        old_engagements = (
+            self.session.query(IssueEngagement)
+            .filter(
+                IssueEngagement.user_id == user_id,
+                IssueEngagement.last_interaction < cutoff,
+                IssueEngagement.engagement_score
+                > 0.0,  # Don't decay already-zero scores
+            )
+            .all()
+        )
+
+        count = 0
+        for engagement in old_engagements:
+            # Apply decay
+            current_score: float = engagement.engagement_score  # type: ignore[attr-defined]
+            new_score = max(0.0, current_score * (1.0 - decay_factor))
+
+            # SQLAlchemy ORM: Column assignments at runtime work despite type hints
+            engagement.engagement_score = new_score  # type: ignore[assignment]
+            count += 1
+
+        if count > 0:
+            self.session.commit()
+            logger.info(f"Decayed {count} engagement scores for user {user_id}")
+
+        return count
+
+    def delete_all_engagements(self, user_id: str) -> int:
+        """
+        Delete all engagement records for a user.
+
+        Used when user wants to reset all preferences and engagement data.
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            Number of engagement records deleted
+        """
+        count = (
+            self.session.query(IssueEngagement)
+            .filter(IssueEngagement.user_id == user_id)
+            .delete()
+        )
+
+        self.session.commit()
+        logger.info(f"Deleted {count} engagement records for user {user_id}")
+        return count
+
+
+class UserPreferenceRepository:
+    """Repository for UserPreference model operations."""
+
+    def __init__(self, session: Session):
+        """
+        Initialize repository with database session.
+
+        Args:
+            session: SQLAlchemy session
+        """
+        self.session = session
+
+    def save_preference(
+        self,
+        user_id: str,
+        preference_type: str,
+        preference_key: str,
+        score: float,
+        confidence: float = 0.5,
+        feedback_count: int = 0,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> UserPreference:
+        """
+        Save or update user preference.
+
+        Uses upsert logic: if preference exists, updates it; otherwise creates new.
+
+        Args:
+            user_id: User identifier
+            preference_type: Type of preference ("topic", "team", "label")
+            preference_key: Specific preference key (e.g., "backend", "engineering")
+            score: Preference score (0.0 to 1.0)
+            confidence: Confidence level (0.0 to 1.0)
+            feedback_count: Number of feedback data points used
+            extra_metadata: Additional context
+
+        Returns:
+            Created or updated UserPreference instance
+
+        Raises:
+            ValueError: If preference_type is invalid or score out of range
+        """
+        # Validate inputs
+        valid_types = ("topic", "team", "label")
+        if preference_type not in valid_types:
+            raise ValueError(
+                f"Invalid preference_type: {preference_type}. "
+                f"Must be one of {valid_types}"
+            )
+
+        if not 0.0 <= score <= 1.0:
+            raise ValueError(f"Score must be between 0.0 and 1.0, got {score}")
+
+        if not 0.0 <= confidence <= 1.0:
+            raise ValueError(
+                f"Confidence must be between 0.0 and 1.0, got {confidence}"
+            )
+
+        # Try to find existing preference
+        existing = (
+            self.session.query(UserPreference)
+            .filter(
+                UserPreference.user_id == user_id,
+                UserPreference.preference_type == preference_type,
+                UserPreference.preference_key == preference_key,
+            )
+            .first()
+        )
+
+        if existing:
+            # Update existing preference
+            # SQLAlchemy ORM: Column assignments at runtime work despite type hints
+            existing.score = score  # type: ignore[assignment]
+            existing.confidence = confidence  # type: ignore[assignment]
+            existing.feedback_count = feedback_count  # type: ignore[assignment]
+            existing.last_updated = datetime.utcnow()  # type: ignore[assignment]
+            if extra_metadata:
+                existing.extra_metadata = extra_metadata  # type: ignore[assignment]
+
+            self.session.commit()
+            self.session.refresh(existing)
+
+            logger.debug(
+                f"Updated preference: {user_id}/{preference_type}/{preference_key} "
+                f"(score={score}, confidence={confidence})"
+            )
+            return existing
+        else:
+            # Create new preference
+            preference = UserPreference(
+                user_id=user_id,
+                preference_type=preference_type,
+                preference_key=preference_key,
+                score=score,
+                confidence=confidence,
+                feedback_count=feedback_count,
+                extra_metadata=extra_metadata,
+            )
+
+            self.session.add(preference)
+            self.session.commit()
+            self.session.refresh(preference)
+
+            logger.debug(
+                f"Created preference: {user_id}/{preference_type}/{preference_key} "
+                f"(score={score}, confidence={confidence})"
+            )
+            return preference
+
+    def get_preferences_by_type(
+        self, user_id: str, preference_type: str
+    ) -> List[UserPreference]:
+        """
+        Get all preferences of specific type for a user.
+
+        Args:
+            user_id: User identifier
+            preference_type: Type of preference ("topic", "team", "label")
+
+        Returns:
+            List of UserPreference instances, ordered by score descending
+        """
+        return (
+            self.session.query(UserPreference)
+            .filter(
+                UserPreference.user_id == user_id,
+                UserPreference.preference_type == preference_type,
+            )
+            .order_by(desc(UserPreference.score))
+            .all()
+        )
+
+    def get_all_preferences(self, user_id: str) -> List[UserPreference]:
+        """
+        Get all preferences for a user across all types.
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            List of UserPreference instances, ordered by type then score
+        """
+        return (
+            self.session.query(UserPreference)
+            .filter(UserPreference.user_id == user_id)
+            .order_by(UserPreference.preference_type, desc(UserPreference.score))
+            .all()
+        )
+
+    def get_preference(
+        self, user_id: str, preference_type: str, preference_key: str
+    ) -> Optional[UserPreference]:
+        """
+        Get a specific preference.
+
+        Args:
+            user_id: User identifier
+            preference_type: Type of preference
+            preference_key: Specific preference key
+
+        Returns:
+            UserPreference instance if found, None otherwise
+        """
+        return (
+            self.session.query(UserPreference)
+            .filter(
+                UserPreference.user_id == user_id,
+                UserPreference.preference_type == preference_type,
+                UserPreference.preference_key == preference_key,
+            )
+            .first()
+        )
+
+    def get_top_preferences(
+        self,
+        user_id: str,
+        preference_type: str,
+        limit: int = 5,
+        min_score: float = 0.6,
+    ) -> List[UserPreference]:
+        """
+        Get top N preferences of a type above minimum score.
+
+        Args:
+            user_id: User identifier
+            preference_type: Type of preference
+            limit: Maximum number to return
+            min_score: Minimum score threshold (default 0.6)
+
+        Returns:
+            List of top UserPreference instances
+        """
+        return (
+            self.session.query(UserPreference)
+            .filter(
+                UserPreference.user_id == user_id,
+                UserPreference.preference_type == preference_type,
+                UserPreference.score >= min_score,
+            )
+            .order_by(desc(UserPreference.score))
+            .limit(limit)
+            .all()
+        )
+
+    def delete_preference(
+        self, user_id: str, preference_type: str, preference_key: str
+    ) -> bool:
+        """
+        Delete a specific preference.
+
+        Args:
+            user_id: User identifier
+            preference_type: Type of preference
+            preference_key: Specific preference key
+
+        Returns:
+            True if deleted, False if not found
+        """
+        count = (
+            self.session.query(UserPreference)
+            .filter(
+                UserPreference.user_id == user_id,
+                UserPreference.preference_type == preference_type,
+                UserPreference.preference_key == preference_key,
+            )
+            .delete()
+        )
+        self.session.commit()
+
+        logger.info(
+            f"Deleted preference for user {user_id}: {preference_type}/{preference_key}"
+        )
+        return count > 0
+
+    def delete_preferences(
+        self, user_id: str, preference_type: Optional[str] = None
+    ) -> int:
+        """
+        Delete preferences for a user.
+
+        Args:
+            user_id: User identifier
+            preference_type: Optional type filter (if None, deletes all types)
+
+        Returns:
+            Number of preferences deleted
+        """
+        query = self.session.query(UserPreference).filter(
+            UserPreference.user_id == user_id
+        )
+
+        if preference_type:
+            query = query.filter(UserPreference.preference_type == preference_type)
+
+        count = query.delete()
+        self.session.commit()
+
+        logger.info(
+            f"Deleted {count} preferences for user {user_id}"
+            + (f" (type={preference_type})" if preference_type else " (all types)")
+        )
+        return count
+
+    def get_preference_summary(self, user_id: str) -> Dict[str, Any]:
+        """
+        Get summary statistics of user preferences.
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            Dict with counts by type, average scores, etc.
+        """
+        all_prefs = self.get_all_preferences(user_id)
+
+        if not all_prefs:
+            return {
+                "total_count": 0,
+                "by_type": {},
+                "avg_score": 0.0,
+                "avg_confidence": 0.0,
+            }
+
+        by_type = defaultdict(lambda: {"count": 0, "avg_score": 0.0})
+        total_score = 0.0
+        total_confidence = 0.0
+
+        for pref in all_prefs:
+            by_type[pref.preference_type]["count"] += 1
+            by_type[pref.preference_type]["avg_score"] += pref.score
+            total_score += pref.score
+            total_confidence += pref.confidence
+
+        # Calculate averages
+        for pref_type in by_type:
+            count = by_type[pref_type]["count"]
+            by_type[pref_type]["avg_score"] = round(
+                by_type[pref_type]["avg_score"] / count, 2
+            )
+
+        return {
+            "total_count": len(all_prefs),
+            "by_type": dict(by_type),
+            "avg_score": round(total_score / len(all_prefs), 2),
+            "avg_confidence": round(total_confidence / len(all_prefs), 2),
         }

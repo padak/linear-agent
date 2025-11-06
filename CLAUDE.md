@@ -300,6 +300,9 @@ Visible console logging for all Claude API calls:
 - ChromaDB persists data in `~/.linear_chief/chromadb` by default
 - Clear ChromaDB: `rm -rf ~/.linear_chief/chromadb` to reset vector store
 - Warnings about duplicate IDs are harmless but indicate inefficiency
+- **Metadata values MUST be primitives only** - ChromaDB only supports str, int, float, bool
+- List values are automatically converted to comma-separated strings by `_sanitize_metadata()`
+- Example: `{"labels": ["bug", "urgent"]}` becomes `{"labels": "bug,urgent"}`
 
 ### SQLAlchemy Reserved Words
 

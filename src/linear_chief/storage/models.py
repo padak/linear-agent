@@ -162,3 +162,80 @@ class Feedback(Base):
 
     def __repr__(self) -> str:
         return f"<Feedback(user_id={self.user_id}, type={self.feedback_type}, timestamp={self.timestamp})>"
+
+
+class IssueEngagement(Base):
+    """
+    Track user engagement with specific Linear issues.
+
+    Records when users interact with issues (queries, views, mentions) to learn
+    engagement patterns and improve personalized issue ranking in briefings.
+
+    Engagement score (0.0 to 1.0) combines:
+    - Frequency: How often user interacts with this issue
+    - Recency: How recently user interacted (exponential decay)
+    """
+
+    __tablename__ = "issue_engagements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(100), nullable=False)  # Telegram user ID
+    issue_id = Column(String(50), nullable=False)  # e.g., "AI-1799", "DMD-480"
+    linear_id = Column(String(100), nullable=False)  # Linear UUID
+    interaction_type = Column(String(20), nullable=False)  # 'query', 'view', 'mention'
+    interaction_count = Column(Integer, nullable=False, default=1)
+    engagement_score = Column(Float, nullable=False, default=0.5)
+    last_interaction = Column(DateTime, nullable=False, default=func.now())
+    first_interaction = Column(DateTime, nullable=False, default=func.now())
+    context = Column(Text, nullable=True)  # What user said (first 200 chars)
+    extra_metadata = Column(JSON, nullable=True)  # Additional fields for future use
+
+    __table_args__ = (
+        Index("ix_issue_engagements_user_id", "user_id"),
+        Index("ix_issue_engagements_issue_id", "issue_id"),
+        Index("ix_issue_engagements_score", "engagement_score"),
+        Index("ix_issue_engagements_last_interaction", "last_interaction"),
+        Index("ix_issue_engagements_user_issue", "user_id", "issue_id", unique=True),
+    )
+
+    def __repr__(self) -> str:
+        return f"<IssueEngagement(user_id={self.user_id}, issue_id={self.issue_id}, score={self.engagement_score}, count={self.interaction_count})>"
+
+
+class UserPreference(Base):
+    """
+    Store learned user preferences from feedback analysis.
+
+    Tracks user preferences for topics, teams, labels, and other
+    issue characteristics learned from feedback patterns. Used for
+    intelligent briefing personalization.
+    """
+
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(100), nullable=False)
+    preference_type = Column(String(50), nullable=False)  # "topic", "team", "label"
+    preference_key = Column(
+        String(100), nullable=False
+    )  # e.g., "backend", "engineering"
+    score = Column(Float, nullable=False)  # 0.0 to 1.0 (preference strength)
+    confidence = Column(Float, nullable=False, default=0.5)  # How certain are we
+    feedback_count = Column(Integer, nullable=False, default=0)  # Data points used
+    last_updated = Column(DateTime, nullable=False, default=func.now())
+    extra_metadata = Column(JSON, nullable=True)  # Additional context
+
+    __table_args__ = (
+        Index("ix_user_preferences_user_id", "user_id"),
+        Index("ix_user_preferences_type", "preference_type"),
+        Index(
+            "ix_user_preferences_user_type_key",
+            "user_id",
+            "preference_type",
+            "preference_key",
+            unique=True,
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserPreference(user_id={self.user_id}, type={self.preference_type}, key={self.preference_key}, score={self.score})>"

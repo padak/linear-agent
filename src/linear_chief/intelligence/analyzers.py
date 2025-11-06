@@ -84,13 +84,10 @@ class IssueAnalyzer:
 
             # Check labels for "On Hold" or "Waiting"
             labels = [
-                label.get("name", "").lower()
-                for label in issue.get("labels", {}).get("nodes", [])
+                label.get("name", "").lower() for label in issue.get("labels", {}).get("nodes", [])
             ]
             if any(
-                keyword in label
-                for label in labels
-                for keyword in ["on hold", "waiting", "paused"]
+                keyword in label for label in labels for keyword in ["on hold", "waiting", "paused"]
             ):
                 return False
 
@@ -143,8 +140,7 @@ class IssueAnalyzer:
         try:
             # Check labels for "Blocked"
             labels = [
-                label.get("name", "").lower()
-                for label in issue.get("labels", {}).get("nodes", [])
+                label.get("name", "").lower() for label in issue.get("labels", {}).get("nodes", [])
             ]
             if any("blocked" in label for label in labels):
                 return True
@@ -194,10 +190,7 @@ class IssueAnalyzer:
             priority = 5  # Base priority
 
             # Check priority labels
-            labels = [
-                label.get("name", "")
-                for label in issue.get("labels", {}).get("nodes", [])
-            ]
+            labels = [label.get("name", "") for label in issue.get("labels", {}).get("nodes", [])]
             for label in labels:
                 if "P0" in label or "Critical" in label:
                     priority = max(priority, 10)
@@ -211,9 +204,7 @@ class IssueAnalyzer:
             # Age factor (issues older than 7 days get +1 point)
             created_at_str = issue.get("createdAt")
             if created_at_str:
-                created_at = datetime.fromisoformat(
-                    created_at_str.replace("Z", "+00:00")
-                )
+                created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
                 age_days = (datetime.now(created_at.tzinfo) - created_at).days
                 if age_days > 7:
                     priority = min(priority + 1, 10)
@@ -240,6 +231,84 @@ class IssueAnalyzer:
                 exc_info=True,
             )
             return 5  # Default priority on error
+
+    async def analyze_with_preferences(
+        self,
+        issues: list[dict[str, Any]],
+        user_id: str,
+    ) -> list[AnalysisResult]:
+        """
+        Analyze issues and apply personalized ranking.
+
+        Combines standard issue analysis with user preference data to create
+        personalized priority scores. This method should be used when user
+        preferences are available for enhanced briefing personalization.
+
+        Args:
+            issues: List of issues to analyze
+            user_id: User ID for preference lookup
+
+        Returns:
+            List of AnalysisResult with personalized priorities, sorted by priority desc
+
+        Example:
+            analyzer = IssueAnalyzer()
+            results = await analyzer.analyze_with_preferences(
+                issues=linear_issues,
+                user_id="user@example.com"
+            )
+            # Results are sorted by personalized_priority (highest first)
+        """
+        from .preference_ranker import PreferenceBasedRanker
+
+        logger.info(f"Analyzing {len(issues)} issues with preferences for user {user_id}")
+
+        # Analyze all issues (existing logic)
+        results = []
+        for issue in issues:
+            analysis = self.analyze_issue(issue)
+            # Store issue data in result for preference calculation
+            analysis.issue_id = issue.get("identifier", "")  # type: ignore[attr-defined]
+            analysis.title = issue.get("title", "")  # type: ignore[attr-defined]
+            analysis.description = issue.get("description", "")  # type: ignore[attr-defined]
+            analysis.team = issue.get("team", {})  # type: ignore[attr-defined]
+            analysis.labels = issue.get("labels", {})  # type: ignore[attr-defined]
+            results.append(analysis)
+
+        # Apply preference-based ranking
+        ranker = PreferenceBasedRanker(user_id=user_id)
+
+        # Calculate personalized priorities
+        for result in results:
+            issue_dict = {
+                "identifier": getattr(result, "issue_id", ""),
+                "title": getattr(result, "title", ""),
+                "description": getattr(result, "description", ""),
+                "team": getattr(result, "team", {}),
+                "labels": getattr(result, "labels", {}),
+            }
+
+            personalized_priority = await ranker.calculate_personalized_priority(
+                issue=issue_dict,
+                base_priority=float(result.priority),
+            )
+
+            # Update result with personalized priority
+            result.personalized_priority = personalized_priority  # type: ignore[attr-defined]
+
+        # Sort by personalized priority
+        results.sort(
+            key=lambda r: getattr(r, "personalized_priority", r.priority),
+            reverse=True,
+        )
+
+        logger.info(
+            f"Analyzed {len(results)} issues with preferences. "
+            f"Top issue priority: {results[0].priority} -> "
+            f"{getattr(results[0], 'personalized_priority', results[0].priority):.2f}"
+        )
+
+        return results
 
     def _generate_insights(
         self, issue: dict[str, Any], is_stagnant: bool, is_blocked: bool, priority: int
@@ -268,9 +337,7 @@ class IssueAnalyzer:
 
             now = datetime.now(timezone.utc)
             days_since_update = (now - updated_at).days
-            insights.append(
-                f"No activity for {days_since_update} days - needs attention"
-            )
+            insights.append(f"No activity for {days_since_update} days - needs attention")
 
         if is_blocked:
             insights.append("Issue is blocked - investigate dependencies")
@@ -280,9 +347,7 @@ class IssueAnalyzer:
 
         status = issue.get("state", {}).get("name", "")
         if status.lower() in ["todo", "backlog"] and priority >= 7:
-            insights.append(
-                "High priority but not started - consider moving to In Progress"
-            )
+            insights.append("High priority but not started - consider moving to In Progress")
 
         if not insights:
             insights.append("No immediate concerns detected")

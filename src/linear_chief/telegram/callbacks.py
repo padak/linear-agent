@@ -181,3 +181,95 @@ async def issue_action_callback_handler(
     except Exception as e:
         logger.error(f"Error handling issue action callback: {e}", exc_info=True)
         await query.answer("❌ Sorry, something went wrong. Please try again.")
+
+
+async def preferences_reset_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle preference reset confirmation/cancellation.
+
+    Args:
+        update: Telegram Update object
+        context: Callback context
+
+    Callback data format:
+        - "prefs_reset_confirm" - Confirmed reset
+        - "prefs_reset_cancel" - Cancelled reset
+    """
+    query = update.callback_query
+    if not query:
+        logger.warning("Received preferences callback without query")
+        return
+
+    await query.answer()
+
+    callback_data = query.data
+    if not callback_data:
+        logger.warning("Received preferences callback without data")
+        return
+
+    if callback_data == "prefs_reset_cancel":
+        await query.edit_message_text(
+            text="❌ Reset cancelled.\n\n" "Your preferences are safe!",
+            parse_mode="Markdown",
+        )
+        logger.info("User cancelled preference reset")
+        return
+
+    # Confirmed reset
+    from linear_chief.storage.repositories import (
+        UserPreferenceRepository,
+        IssueEngagementRepository,
+    )
+    from linear_chief.storage.database import get_session_maker, get_db_session
+    from linear_chief.config import LINEAR_USER_EMAIL
+
+    user_id = LINEAR_USER_EMAIL
+
+    if not user_id:
+        await query.edit_message_text(
+            text="⚠️ User email not configured.\n\n"
+            "Set LINEAR_USER_EMAIL in .env to use preferences.",
+            parse_mode="Markdown",
+        )
+        return
+
+    try:
+        session_maker = get_session_maker()
+
+        deleted_prefs = 0
+        deleted_eng = 0
+
+        # Delete preferences
+        for session in get_db_session(session_maker):
+            pref_repo = UserPreferenceRepository(session)
+            deleted_prefs = pref_repo.delete_preferences(user_id=user_id)
+
+        # Delete engagement data
+        for session in get_db_session(session_maker):
+            eng_repo = IssueEngagementRepository(session)
+            deleted_eng = eng_repo.delete_all_engagements(user_id=user_id)
+
+        await query.edit_message_text(
+            text=f"✅ **Preferences Reset Complete**\n\n"
+            f"Deleted:\n"
+            f"• {deleted_prefs} preference records\n"
+            f"• {deleted_eng} engagement records\n\n"
+            f"Briefings will now use default ranking until you provide new feedback.",
+            parse_mode="Markdown",
+        )
+
+        logger.info(
+            f"User {user_id} reset all preferences and engagement data",
+            extra={
+                "deleted_prefs": deleted_prefs,
+                "deleted_eng": deleted_eng,
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"Error resetting preferences: {e}", exc_info=True)
+        await query.edit_message_text(
+            text=f"❌ Error resetting preferences: {str(e)}",
+            parse_mode="Markdown",
+        )

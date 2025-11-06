@@ -60,7 +60,9 @@ class BriefingAgent:
         description = issue.get("description", "")
         if description:
             # Truncate long descriptions
-            description = description[:300] + "..." if len(description) > 300 else description
+            description = (
+                description[:300] + "..." if len(description) > 300 else description
+            )
             parts.append(f"Description: {description}")
 
         # Add recent comments
@@ -96,7 +98,10 @@ Guidelines:
 - Prioritize by impact, not just priority labels"""
 
     def _build_user_prompt(
-        self, issues: List[Dict[str, Any]], user_context: Optional[str] = None
+        self,
+        issues: List[Dict[str, Any]],
+        user_context: Optional[str] = None,
+        related_map: Optional[Dict[str, List[Dict[str, Any]]]] = None,
     ) -> str:
         """
         Build the user prompt with issues.
@@ -104,11 +109,14 @@ Guidelines:
         Args:
             issues: List of issue dictionaries
             user_context: Optional user preferences/context
+            related_map: Optional mapping of issue_id -> related_issues
 
         Returns:
             User prompt string
         """
-        formatted_issues = "\n\n---\n\n".join([self._format_issue(issue) for issue in issues])
+        formatted_issues = "\n\n---\n\n".join(
+            [self._format_issue(issue) for issue in issues]
+        )
 
         prompt = f"""Analyze these {len(issues)} Linear issues and create a morning briefing.
 
@@ -121,6 +129,28 @@ Please provide:
 4. **Quick Wins** (easy tasks that can be completed today)
 
 Keep it concise and actionable. Focus on what I need to know and do today."""
+
+        # Add related issues context if provided
+        if related_map:
+            related_section = "\n\n**RELATED ISSUES DATA:**\n"
+            related_section += "Some issues have related work that may be relevant:\n\n"
+
+            for issue_id, related in related_map.items():
+                if related:
+                    related_section += f"{issue_id} is related to:\n"
+                    for rel in related:
+                        rel_id = rel.get("issue_id", "Unknown")
+                        rel_title = rel.get("title", "")
+                        similarity = rel.get("similarity", 0.0)
+                        related_section += (
+                            f"  - {rel_id}: {rel_title} ({similarity:.0%} similar)\n"
+                        )
+                    related_section += "\n"
+
+            related_section += (
+                "Please mention related issues where relevant in the briefing.\n"
+            )
+            prompt += related_section
 
         if user_context:
             prompt = f"User context: {user_context}\n\n{prompt}"
@@ -182,6 +212,77 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
             },
         )
 
+        # Find related issues for briefing context
+        related_map: Dict[str, List[Dict[str, Any]]] = {}
+        try:
+            from linear_chief.intelligence.related_suggester import (
+                RelatedIssuesSuggester,
+            )
+
+            suggester = RelatedIssuesSuggester()
+            # Find related issues for top 5 issues (avoid overwhelming the prompt)
+            related_map = await suggester.add_to_briefing_context(
+                issues=issues[:5],
+                max_related_per_issue=2,
+            )
+
+            logger.info(
+                f"Found related issues for {len(related_map)} briefing issues",
+                extra={"related_issues_count": len(related_map)},
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to find related issues for briefing",
+                extra={"error_type": type(e).__name__},
+                exc_info=True,
+            )
+            # Don't fail briefing generation if related issues fails
+            related_map = {}
+
+        # Check for duplicates in the issues being briefed
+        duplicate_warnings = []
+        try:
+            from linear_chief.intelligence.duplicate_detector import DuplicateDetector
+
+            detector = DuplicateDetector()
+            issue_ids = [
+                issue.get("identifier") for issue in issues if issue.get("identifier")
+            ]
+
+            # Check each issue for duplicates
+            for issue_id in issue_ids:
+                dups = await detector.check_issue_for_duplicates(
+                    issue_id, min_similarity=0.85
+                )
+                if dups:
+                    duplicate_warnings.extend(dups)
+
+            # Remove duplicate entries (same pair might appear multiple times)
+            if duplicate_warnings:
+                seen_pairs = set()
+                unique_warnings = []
+                for dup in duplicate_warnings:
+                    pair = tuple(sorted([dup["issue_a"], dup["issue_b"]]))
+                    if pair not in seen_pairs:
+                        seen_pairs.add(pair)
+                        unique_warnings.append(dup)
+                duplicate_warnings = unique_warnings
+
+            logger.info(
+                f"Duplicate detection found {len(duplicate_warnings)} potential duplicates",
+                extra={"duplicate_count": len(duplicate_warnings)},
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to check for duplicates during briefing generation",
+                extra={"error_type": type(e).__name__},
+                exc_info=True,
+            )
+            # Don't fail briefing generation if duplicate detection fails
+            duplicate_warnings = []
+
         try:
             response = self.client.messages.create(
                 model=self.model,
@@ -190,7 +291,9 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
                 messages=[
                     {
                         "role": "user",
-                        "content": self._build_user_prompt(issues, user_context),
+                        "content": self._build_user_prompt(
+                            issues, user_context, related_map
+                        ),
                     }
                 ],
             )
@@ -226,7 +329,8 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
                     "service": "Anthropic",
                     "input_tokens": response.usage.input_tokens,
                     "output_tokens": response.usage.output_tokens,
-                    "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                    "total_tokens": response.usage.input_tokens
+                    + response.usage.output_tokens,
                     "cost_usd": cost_usd,
                     "model": self.model,
                 },
@@ -234,6 +338,33 @@ Keep it concise and actionable. Focus on what I need to know and do today."""
 
             # Post-process: Add clickable links for issue identifiers
             briefing_with_links = self._add_clickable_links(briefing, issues)
+
+            # Append duplicate warnings if any were found
+            if duplicate_warnings:
+                from linear_chief.intelligence.duplicate_detector import (
+                    DuplicateDetector,
+                )
+
+                detector = DuplicateDetector()
+                duplicate_section = "\n\n---\n\n" + detector.format_duplicate_report(
+                    duplicate_warnings
+                )
+
+                # Replace emoji placeholders with actual emojis
+                duplicate_section = duplicate_section.replace("Warning", "\u26a0\ufe0f")
+                duplicate_section = duplicate_section.replace(
+                    "Double-arrows", "\u2194\ufe0f"
+                )
+                duplicate_section = duplicate_section.replace("Bullet", "\u2022")
+                duplicate_section = duplicate_section.replace(
+                    "Right-arrow", "\u27a1\ufe0f"
+                )
+
+                briefing_with_links += duplicate_section
+
+                logger.info(
+                    f"Added {len(duplicate_warnings)} duplicate warnings to briefing",
+                )
 
             return briefing_with_links
 
